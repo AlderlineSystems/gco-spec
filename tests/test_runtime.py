@@ -1,0 +1,355 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+import jwt
+import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from conftest import BASE_TIME, make_child_gco, make_root_gco
+from gco.attestation import AttestationError
+from gco.derivation import DelegationRequest
+from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, TaintPolicy, ToolAuthority
+from gco.runtime import Decision, GovernanceRuntime
+from gco.state_store import GovernedStateStore
+from gco.trust import TrustBundle
+from gco.validator import DerivationError, canonical_gco_hash
+
+SPIFFE_ID = "spiffe://example.org/ns/default/sa/model-alpha"
+NOW = datetime(2099, 1, 1, 11, 0, tzinfo=timezone.utc)
+
+
+def _key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _jwk(private_key, kid: str) -> dict:
+    payload = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    payload.update({"kid": kid, "alg": "RS256", "use": "sig"})
+    return payload
+
+
+def _bundle(key, *, kid: str = "runtime") -> TrustBundle:
+    return TrustBundle.from_mapping({"example.org": {"jwks": {"keys": [_jwk(key, kid)]}}})
+
+
+def _claims(gco: GCO, *, exp: datetime | None = None) -> dict:
+    return {
+        "sub": gco.model_identity,
+        "gco_hash": canonical_gco_hash(gco),
+        "exp": int((exp or NOW + timedelta(hours=1)).timestamp()),
+    }
+
+
+def _attestation(gco: GCO, key, *, kid: str = "runtime") -> AttestationModel:
+    return AttestationModel(
+        format=AttestationFormat.JWT_SVID,
+        value=jwt.encode(_claims(gco), key, algorithm="RS256", headers={"kid": kid}),
+    )
+
+
+def _with_identity(gco: GCO) -> GCO:
+    return gco.model_copy(update={"model_identity": SPIFFE_ID})
+
+
+def _sign(gco: GCO, key, *, kid: str = "runtime") -> GCO:
+    return gco.model_copy(update={"attestation": _attestation(gco, key, kid=kid)})
+
+
+def _parent_child(key):
+    parent = _with_identity(make_root_gco())
+    child = make_child_gco(parent)
+    return _sign(parent, key), _sign(child, key)
+
+
+class SigningAuthority:
+    def __init__(self, key, *, kid: str = "runtime") -> None:
+        self.key = key
+        self.kid = kid
+
+    def issue(self, identity: str, gco_data: dict) -> AttestationModel:
+        subject = GCO.model_validate({**gco_data, "attestation": None})
+        subject = subject.model_copy(update={"model_identity": identity})
+        return _attestation(subject, self.key, kid=self.kid)
+
+
+def test_decision_is_frozen():
+    decision = Decision(allowed=True)
+
+    with pytest.raises(Exception):  # noqa: B017
+        decision.allowed = False
+
+
+def test_authorize_subcall_allows_authentic_tightening():
+    key = _key()
+    parent, child = _parent_child(key)
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_subcall(parent, child)
+
+    assert decision == Decision(allowed=True)
+
+
+def test_authorize_subcall_denies_authentic_expansion_with_derivation_error():
+    key = _key()
+    parent, child = _parent_child(key)
+    expanded = child.model_copy(
+        update={"tool_authority": [ToolAuthority(tool_uri="https://tools.example/search", scope="read write admin", max_depth=1)]}
+    )
+    expanded = _sign(expanded, key)
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_subcall(parent, expanded)
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+    assert decision.reason == DerivationError.TOOL_AUTHORITY_EXPANDED.value
+
+
+def test_authorize_subcall_denies_unauthentic_perfect_tightening_before_validation():
+    trusted = _key()
+    forged = _key()
+    parent = _with_identity(make_root_gco())
+    child = make_child_gco(parent)
+    child = _sign(child, forged, kid="forged")
+
+    decision = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).authorize_subcall(parent, child)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+    assert decision.reason == "JWS key id is not trusted"
+
+
+def test_authorize_subcall_malformed_input_denies_without_raise():
+    key = _key()
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_subcall(None, {"not": "a gco"})
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.GCO_MALFORMED
+
+
+def test_authorize_subcall_unexpected_error_denies_without_raise():
+    class ExplodingVerifier:
+        def verify(self, attestation, gco):
+            raise RuntimeError("boom")
+
+    key = _key()
+    parent, child = _parent_child(key)
+
+    decision = GovernanceRuntime(_bundle(key), verifier=ExplodingVerifier(), now=lambda: NOW).authorize_subcall(parent, child)
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.GCO_MALFORMED
+    assert decision.reason == "boom"
+
+
+def test_authorize_tool_call_authentic_valid_and_invalid():
+    key = _key()
+    parent = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    allowed = runtime.authorize_tool_call(parent, "https://tools.example/search")
+    absent = runtime.authorize_tool_call(parent, "https://tools.example/missing")
+    exhausted = runtime.authorize_tool_call(
+        _sign(
+            parent.model_copy(update={"tool_authority": [ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=0)]}),
+            key,
+        ),
+        "https://tools.example/search",
+    )
+    empty_scope = runtime.authorize_tool_call(
+        _sign(
+            parent.model_copy(update={"tool_authority": [ToolAuthority(tool_uri="https://tools.example/search", scope=" ", max_depth=1)]}),
+            key,
+        ),
+        "https://tools.example/search",
+    )
+
+    assert allowed.allowed is True
+    assert absent.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+    assert absent.reason == "tool https://tools.example/missing is not delegated"
+    assert exhausted.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+    assert empty_scope.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_authorize_tool_call_unauthentic_denied_before_authority_check():
+    trusted = _key()
+    forged = _key()
+    gco = _sign(_with_identity(make_root_gco(tool_authority=[])), forged, kid="forged")
+
+    decision = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).authorize_tool_call(gco, "https://tools.example/search")
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+    assert decision.reason == "JWS key id is not trusted"
+
+
+def test_authorize_tool_call_malformed_and_unexpected_errors_deny():
+    class ExplodingVerifier:
+        def verify(self, attestation, gco):
+            raise RuntimeError("tool boom")
+
+    key = _key()
+    gco = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    malformed = runtime.authorize_tool_call({"not": "a gco"}, "https://tools.example/search")
+    exploded = GovernanceRuntime(_bundle(key), verifier=ExplodingVerifier(), now=lambda: NOW).authorize_tool_call(
+        gco,
+        "https://tools.example/search",
+    )
+
+    assert malformed.allowed is False
+    assert malformed.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.allowed is False
+    assert exploded.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.reason == "tool boom"
+
+
+def test_authorize_state_access_authentic_valid_invalid_and_tainted():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    none = _sign(
+        _with_identity(
+            make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.NONE)])
+        ),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    assert runtime.authorize_state_access(writer, "memory", AccessMode.WRITE).allowed is True
+    denied = runtime.authorize_state_access(none, "memory", "write")
+    missing = runtime.authorize_state_access(writer, "missing", "read")
+    store._values[("memory", "__gco_runtime_probe__")] = b"secret"
+    store._taints[("memory", "__gco_runtime_probe__")] = TaintPolicy.TAINTED
+    tainted = runtime.authorize_state_access(writer, "memory", "read")
+
+    assert denied.allowed is False
+    assert denied.reason == "write denied for namespace memory"
+    assert missing.allowed is False
+    assert missing.reason == "namespace missing is not delegated"
+    assert tainted.allowed is False
+    assert tainted.reason == "tainted state rejected for memory/__gco_runtime_probe__"
+
+
+def test_authorize_state_access_append_none_malformed_and_unexpected_errors_deny():
+    class ExplodingStore(GovernedStateStore):
+        def write(self, namespace: str, key: str, value: bytes, gco: GCO) -> None:
+            raise RuntimeError("state boom")
+
+    key = _key()
+    append = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.APPEND)])),
+        key,
+    )
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    assert runtime.authorize_state_access(append, "log", AccessMode.APPEND).allowed is True
+    none_mode = runtime.authorize_state_access(writer, "memory", AccessMode.NONE)
+    malformed_mode = runtime.authorize_state_access(writer, "memory", "bogus")
+    exploded = GovernanceRuntime(_bundle(key), state_store=ExplodingStore(), now=lambda: NOW).authorize_state_access(
+        writer,
+        "memory",
+        "write",
+    )
+
+    assert none_mode.allowed is False
+    assert none_mode.reason == "none denied for namespace memory"
+    assert malformed_mode.allowed is False
+    assert malformed_mode.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.allowed is False
+    assert exploded.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.reason == "state boom"
+
+
+def test_authorize_state_access_unauthentic_denied_before_permission_check():
+    trusted = _key()
+    forged = _key()
+    gco = _sign(_with_identity(make_root_gco(state_access_permissions=[])), forged, kid="forged")
+
+    decision = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).authorize_state_access(gco, "memory", "read")
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+    assert decision.reason == "JWS key id is not trusted"
+
+
+def test_derive_for_subcall_returns_verified_child_and_denies_expansion():
+    key = _key()
+    parent = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), attestation_authority=SigningAuthority(key), now=lambda: NOW)
+    valid_request = DelegationRequest(
+        tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=99)],
+        state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)],
+        requested_expiry=NOW + timedelta(minutes=30),
+    )
+    expanding_request = DelegationRequest(
+        tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="admin", max_depth=99)],
+        requested_expiry=NOW + timedelta(minutes=30),
+    )
+
+    allowed = runtime.derive_for_subcall(parent, valid_request)
+    denied = runtime.derive_for_subcall(parent, expanding_request)
+
+    assert allowed.allowed is True
+    assert allowed.child is not None
+    assert runtime.authorize_subcall(parent, allowed.child).allowed is True
+    assert denied.allowed is False
+    assert denied.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+    assert denied.reason == DerivationError.TOOL_AUTHORITY_EXPANDED.value
+
+
+def test_derive_for_subcall_denies_untrusted_minted_attestation_and_missing_authority():
+    trusted = _key()
+    untrusted = _key()
+    parent = _sign(_with_identity(make_root_gco()), trusted)
+    request = DelegationRequest(
+        tool_authority=[],
+        state_access_permissions=[],
+        requested_expiry=NOW + timedelta(minutes=30),
+    )
+
+    untrusted_decision = GovernanceRuntime(
+        _bundle(trusted),
+        attestation_authority=SigningAuthority(untrusted, kid="untrusted"),
+        now=lambda: NOW,
+    ).derive_for_subcall(parent, request)
+    missing_authority = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).derive_for_subcall(parent, request)
+
+    assert untrusted_decision.allowed is False
+    assert untrusted_decision.error_code is AttestationError.UNTRUSTED_KEY
+    assert untrusted_decision.reason == "JWS key id is not trusted"
+    assert missing_authority.allowed is False
+    assert missing_authority.error_code is AttestationError.MALFORMED_ATTESTATION
+    assert missing_authority.reason == "attestation authority is not configured"
+
+
+def test_derive_for_subcall_malformed_request_unexpected_error_and_default_reason():
+    class ExplodingAuthority:
+        def issue(self, identity: str, gco_data: dict) -> AttestationModel:
+            raise RuntimeError("derive boom")
+
+    key = _key()
+    parent = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), attestation_authority=SigningAuthority(key), now=lambda: NOW)
+    malformed = runtime.derive_for_subcall(parent, {"requested_expiry": "not a date"})
+    exploded = GovernanceRuntime(_bundle(key), attestation_authority=ExplodingAuthority(), now=lambda: NOW).derive_for_subcall(
+        parent,
+        DelegationRequest(requested_expiry=NOW + timedelta(minutes=30)),
+    )
+    default_reason = runtime._deny(DerivationError.EXPIRED)
+
+    assert malformed.allowed is False
+    assert malformed.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.allowed is False
+    assert exploded.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.reason == "derive boom"
+    assert default_reason.reason == DerivationError.EXPIRED.value

@@ -17,9 +17,10 @@ strong exactly where the action happens and the hook is present.
 ask "is this command dangerous." It asks "does this node still hold the
 authority its parent had, or did it escape the governance scope as the
 computation branched?" A Governance Context Object travels with execution,
-binds to an attested workload identity, and can only *tighten* as it propagates
-to sub-calls and delegated tool servers - never widen. A descendant cannot
-grant itself more authority than its parent.
+binds to an attested workload identity for the cryptographically verified
+`jwt-svid` and `x509-svid` formats, and can only *tighten* as it propagates to
+sub-calls and delegated tool servers - never widen. A descendant cannot grant
+itself more authority than its parent.
 
 ### Why both are needed
 
@@ -46,8 +47,8 @@ To be explicit, so this is not mistaken for another pattern-matcher:
 - It does **not** prevent prompt injection, perform DLP, or scrub secrets.
 - It does **not** provide host or sandbox isolation.
 - It governs **authority propagation across a call tree** - that is the whole of
-  its job, and it depends on deployment controls outside this package to be
-  enforcing rather than advisory.
+  its job. The runtime seam returns `Decision`s; it is enforcing only when the
+  host gates sub-calls, tool calls, and state access on those decisions.
 
 Think of a content monitor as a smoke detector in each room and GCO as the
 building's access-control system. Neither replaces the other.

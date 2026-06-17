@@ -25,8 +25,10 @@ The state store enforces a binary quarantine gate: `clean` and `sanitized` state
 
 Reader-vs-data taint alignment beyond that quarantine gate is not enforced by `src/gco/state_store.py`; grant-time validation in `src/gco/validator.py` owns taint narrowing today. Per-read alignment may be added as future work if the spec requires it.
 
-## Attestation Verification
+## Cryptographic Verification
 
 The supported attestation formats are `jwt-svid`, `x509-svid`, `raw-jws`, and `tpm-quote`.
 
-The validator currently checks attestation presence and supported format only. Cryptographic JWT-SVID or X.509-SVID verification against a trust bundle is not implemented in this reference layer; it should be added as a separate task with dedicated signature-chain tests rather than a placeholder check.
+`jwt-svid` and `x509-svid` attestations are cryptographically verified by `src/gco/attestation.py` against an offline `TrustBundle`: signature or chain trust, SPIFFE identity binding, canonical GCO digest binding, and expiry are checked before the runtime seam allows authority to be used.
+
+`raw-jws` and `tpm-quote` are declared formats but are not cryptographically verified by this reference implementation. They fail closed as unsupported at the verifier/runtime seam until a dedicated verifier exists.

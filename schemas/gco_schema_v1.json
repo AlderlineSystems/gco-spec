@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sovereignsafetylabs.org/schemas/gco_schema_v1.json",
+  "title": "Governance Context Object v1",
+  "type": "object",
+  "required": [
+    "gco_version",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "policy_id",
+    "model_identity",
+    "intervention_version",
+    "tool_authority",
+    "state_access_permissions",
+    "expires_at",
+    "lineage",
+    "attestation"
+  ],
+  "properties": {
+    "gco_version": { "type": "string" },
+    "trace_id": { "type": "string", "format": "uuid" },
+    "span_id": { "type": "string", "format": "uuid" },
+    "parent_span_id": { "type": ["string", "null"], "format": "uuid" },
+    "policy_id": { "type": "string" },
+    "model_identity": { "type": "string" },
+    "intervention_version": { "type": "string" },
+    "tool_authority": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool_uri", "scope", "max_depth"],
+        "properties": {
+          "tool_uri": { "type": "string", "format": "uri" },
+          "scope": { "type": "string" },
+          "max_depth": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "state_access_permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["namespace", "access_mode"],
+        "properties": {
+          "namespace": { "type": "string" },
+          "access_mode": { "enum": ["read", "write", "append", "none"] },
+          "taint_policy": { "enum": ["clean", "sanitized", "tainted", "isolated"] }
+        }
+      }
+    },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "lineage": { "type": "array", "items": { "type": "string" } },
+    "attestation": {
+      "type": ["object", "null"],
+      "required": ["format", "value"],
+      "properties": {
+        "format": { "enum": ["jwt-svid", "x509-svid", "raw-jws", "tpm-quote"] },
+        "value": { "type": "string" },
+        "issuer": { "type": ["string", "null"], "format": "uri" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

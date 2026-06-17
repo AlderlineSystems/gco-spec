@@ -10,9 +10,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from conftest import BASE_TIME, make_child_gco, make_root_gco
 from gco.attestation import AttestationError
 from gco.derivation import DelegationRequest
-from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, TaintPolicy, ToolAuthority
+from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, ToolAuthority
 from gco.runtime import Decision, GovernanceRuntime
-from gco.state_store import GovernedStateStore
+from gco.state_store import GovernedStateStore, NamespaceAccessDenied
 from gco.trust import TrustBundle
 from gco.validator import DerivationError, canonical_gco_hash
 
@@ -206,7 +206,7 @@ def test_authorize_tool_call_malformed_and_unexpected_errors_deny():
     assert exploded.reason == "tool boom"
 
 
-def test_authorize_state_access_authentic_valid_invalid_and_tainted():
+def test_authorize_state_access_authentic_valid_invalid_and_no_store_mutation():
     key = _key()
     store = GovernedStateStore()
     writer = _sign(
@@ -224,23 +224,17 @@ def test_authorize_state_access_authentic_valid_invalid_and_tainted():
     assert runtime.authorize_state_access(writer, "memory", AccessMode.WRITE).allowed is True
     denied = runtime.authorize_state_access(none, "memory", "write")
     missing = runtime.authorize_state_access(writer, "missing", "read")
-    store._values[("memory", "__gco_runtime_probe__")] = b"secret"
-    store._taints[("memory", "__gco_runtime_probe__")] = TaintPolicy.TAINTED
-    tainted = runtime.authorize_state_access(writer, "memory", "read")
 
     assert denied.allowed is False
     assert denied.reason == "write denied for namespace memory"
     assert missing.allowed is False
     assert missing.reason == "namespace missing is not delegated"
-    assert tainted.allowed is False
-    assert tainted.reason == "tainted state rejected for memory/__gco_runtime_probe__"
+    assert store._values == {}
+    assert store._taints == {}
+    assert not any(key == "__gco_runtime_probe__" for _, key in store._values | store._taints)
 
 
-def test_authorize_state_access_append_none_malformed_and_unexpected_errors_deny():
-    class ExplodingStore(GovernedStateStore):
-        def write(self, namespace: str, key: str, value: bytes, gco: GCO) -> None:
-            raise RuntimeError("state boom")
-
+def test_authorize_state_access_append_idempotent_and_unknown_mode_denies():
     key = _key()
     append = _sign(
         _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.APPEND)])),
@@ -252,19 +246,83 @@ def test_authorize_state_access_append_none_malformed_and_unexpected_errors_deny
     )
     runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
 
-    assert runtime.authorize_state_access(append, "log", AccessMode.APPEND).allowed is True
+    first = runtime.authorize_state_access(append, "log", AccessMode.APPEND)
+    second = runtime.authorize_state_access(append, "log", AccessMode.APPEND)
     none_mode = runtime.authorize_state_access(writer, "memory", AccessMode.NONE)
-    malformed_mode = runtime.authorize_state_access(writer, "memory", "bogus")
-    exploded = GovernanceRuntime(_bundle(key), state_store=ExplodingStore(), now=lambda: NOW).authorize_state_access(
-        writer,
-        "memory",
-        "write",
-    )
+    unknown_mode = runtime.authorize_state_access(writer, "memory", "bogus")
 
+    assert first == Decision(allowed=True)
+    assert second == first
     assert none_mode.allowed is False
     assert none_mode.reason == "none denied for namespace memory"
-    assert malformed_mode.allowed is False
-    assert malformed_mode.error_code is DerivationError.GCO_MALFORMED
+    assert none_mode.error_code is NamespaceAccessDenied
+    assert unknown_mode.allowed is False
+    assert unknown_mode.reason == "bogus denied for namespace memory"
+    assert unknown_mode.error_code is NamespaceAccessDenied
+    assert runtime.state_store._values == {}
+    assert runtime.state_store._taints == {}
+
+
+@pytest.mark.parametrize("granted_mode", [AccessMode.NONE, AccessMode.READ, AccessMode.APPEND, AccessMode.WRITE])
+@pytest.mark.parametrize("requested_mode", [AccessMode.READ, AccessMode.WRITE, AccessMode.APPEND])
+def test_authorize_state_access_matches_store_permission_gate(granted_mode: AccessMode, requested_mode: AccessMode):
+    key = _key()
+    namespace = "memory"
+    store = GovernedStateStore()
+    seed_writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace=namespace, access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    store.write(namespace, "existing", b"value", seed_writer)
+    subject = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace=namespace, access_mode=granted_mode)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=GovernedStateStore(), now=lambda: NOW)
+
+    decision = runtime.authorize_state_access(subject, namespace, requested_mode)
+    try:
+        if requested_mode is AccessMode.READ:
+            store.read(namespace, "existing", subject)
+        else:
+            store.write(namespace, f"{requested_mode.value}-{granted_mode.value}", b"value", subject)
+    except NamespaceAccessDenied:
+        store_allowed = False
+    else:
+        store_allowed = True
+
+    assert decision.allowed is store_allowed
+
+
+def test_authorize_state_access_ungranted_namespace_reason():
+    key = _key()
+    gco = _sign(_with_identity(make_root_gco(state_access_permissions=[])), key)
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_state_access(gco, "memory", "read")
+
+    assert decision.allowed is False
+    assert decision.error_code is NamespaceAccessDenied
+    assert decision.reason == "namespace memory is not delegated"
+
+
+def test_authorize_state_access_malformed_and_unexpected_errors_deny():
+    class ExplodingVerifier:
+        def verify(self, attestation, gco):
+            raise RuntimeError("state boom")
+
+    key = _key()
+    gco = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    malformed = runtime.authorize_state_access({"not": "a gco"}, "memory", "read")
+    exploded = GovernanceRuntime(_bundle(key), verifier=ExplodingVerifier(), now=lambda: NOW).authorize_state_access(
+        gco,
+        "memory",
+        "read",
+    )
+
+    assert malformed.allowed is False
+    assert malformed.error_code is DerivationError.GCO_MALFORMED
     assert exploded.allowed is False
     assert exploded.error_code is DerivationError.GCO_MALFORMED
     assert exploded.reason == "state boom"

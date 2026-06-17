@@ -9,10 +9,10 @@ from pydantic import ValidationError
 
 from gco.attestation import AttestationError, AttestationVerifier
 from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivationRuntime
-from gco.models import AccessMode, GCO, TaintPolicy
-from gco.state_store import GovernedStateStore, NamespaceAccessDenied, TaintedStateRead
+from gco.models import AccessMode, GCO
+from gco.state_store import GovernedStateStore, NamespaceAccessDenied
 from gco.trust import TrustBundle
-from gco.validator import DerivationError, GCODerivationException, GCOValidator, _scope_is_subset
+from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_rank
 
 
 @dataclass(frozen=True)
@@ -63,10 +63,7 @@ class GovernanceRuntime:
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
             for authority in subject.tool_authority:
-                if str(authority.tool_uri) == str(tool_uri) and authority.max_depth > 0 and _scope_is_subset(
-                    authority.scope,
-                    authority.scope,
-                ):
+                if str(authority.tool_uri) == str(tool_uri) and authority.max_depth > 0:
                     if authority.scope.strip():
                         return Decision(allowed=True)
             return self._deny(DerivationError.TOOL_AUTHORITY_EXPANDED, f"tool {tool_uri} is not delegated")
@@ -81,18 +78,25 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
-            access_mode = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
-            key = "__gco_runtime_probe__"
-            if access_mode is AccessMode.READ:
-                self.state_store._values.setdefault((namespace, key), b"")  # noqa: SLF001
-                self.state_store._taints.setdefault((namespace, key), TaintPolicy.CLEAN)  # noqa: SLF001
-                self.state_store.read(namespace, key, subject)
-            elif access_mode in {AccessMode.WRITE, AccessMode.APPEND}:
-                self.state_store.write(namespace, key, b"", subject)
-            else:
-                return self._deny(NamespaceAccessDenied, f"{access_mode.value} denied for namespace {namespace}")
-        except (NamespaceAccessDenied, TaintedStateRead) as exc:
-            return self._deny(type(exc), str(exc))
+            try:
+                requested_mode: Any = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
+            except (TypeError, ValueError):
+                requested_mode = mode
+            permission = next(
+                (permission for permission in subject.state_access_permissions if permission.namespace == namespace),
+                None,
+            )
+            if permission is None:
+                return self._deny(NamespaceAccessDenied, f"namespace {namespace} is not delegated")
+            requested_rank = _access_rank(requested_mode)
+            granted_rank = _access_rank(permission.access_mode)
+            requested_label = requested_mode.value if isinstance(requested_mode, AccessMode) else str(mode)
+            if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
+                return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
+            # This seam checks only the ACL grant; taint and per-key state are enforced by the store at real access time.
+            minimum_rank = _access_rank(AccessMode.READ if requested_mode is AccessMode.READ else AccessMode.APPEND)
+            if minimum_rank is None or granted_rank < minimum_rank:
+                return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         except Exception as exc:  # noqa: BLE001

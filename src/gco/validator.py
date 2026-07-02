@@ -111,6 +111,8 @@ class GCOValidator:
             raise GCODerivationException(DerivationError.PARENT_LINKAGE_INVALID)
         if root.lineage:
             raise GCODerivationException(DerivationError.LINEAGE_APPEND_FAILED)
+        self._validate_no_duplicate_namespaces(root)
+        self._validate_no_duplicate_tool_uris(root)
         self._validate_expiry(root, root)
         self._validate_attestation(root)
         return True
@@ -118,6 +120,10 @@ class GCOValidator:
     def validate(self, parent: GCO | Mapping[str, Any], child: GCO | Mapping[str, Any]) -> bool:
         parent = self._coerce_gco(parent)
         child = self._coerce_gco(child)
+        self._validate_no_duplicate_namespaces(parent)
+        self._validate_no_duplicate_namespaces(child)
+        self._validate_no_duplicate_tool_uris(parent)
+        self._validate_no_duplicate_tool_uris(child)
         self._validate_version(parent, child)
         self._validate_immutables(parent, child)
         self._validate_parent_linkage(parent, child)
@@ -127,6 +133,16 @@ class GCOValidator:
         self._validate_expiry(parent, child)
         self._validate_attestation(child)
         return True
+
+    def _validate_no_duplicate_namespaces(self, gco: GCO) -> None:
+        namespaces = [permission.namespace for permission in gco.state_access_permissions]
+        if len(namespaces) != len(set(namespaces)):
+            raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
+
+    def _validate_no_duplicate_tool_uris(self, gco: GCO) -> None:
+        tool_uris = [str(tool.tool_uri) for tool in gco.tool_authority]
+        if len(tool_uris) != len(set(tool_uris)):
+            raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
 
     def _coerce_gco(self, gco: GCO | Mapping[str, Any]) -> GCO:
         if isinstance(gco, GCO):

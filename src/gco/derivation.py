@@ -46,6 +46,11 @@ class GCODerivationRuntime:
         if len(parent.lineage) + 1 > 128:
             raise GCODerivationException(DerivationError.LINEAGE_FLOODED)
 
+        self._validate_no_duplicate_namespaces(parent.state_access_permissions)
+        self._validate_no_duplicate_namespaces(request.state_access_permissions)
+        self._validate_no_duplicate_tool_uris(parent.tool_authority)
+        self._validate_no_duplicate_tool_uris(request.tool_authority)
+
         child_tools = self._derive_tools(parent, request)
         child_permissions = self._derive_permissions(parent, request)
         child_without_attestation = GCO(
@@ -70,6 +75,16 @@ class GCODerivationRuntime:
         child = child_without_attestation.model_copy(update={"attestation": attestation})
         self.validator.validate(parent, child)
         return child
+
+    def _validate_no_duplicate_namespaces(self, permissions: list[StatePermission]) -> None:
+        namespaces = [permission.namespace for permission in permissions]
+        if len(namespaces) != len(set(namespaces)):
+            raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
+
+    def _validate_no_duplicate_tool_uris(self, tools: list[ToolAuthority]) -> None:
+        tool_uris = [str(tool.tool_uri) for tool in tools]
+        if len(tool_uris) != len(set(tool_uris)):
+            raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
 
     def _derive_tools(self, parent: GCO, request: DelegationRequest) -> list[ToolAuthority]:
         parent_tools = {str(tool.tool_uri): tool for tool in parent.tool_authority}

@@ -142,6 +142,18 @@ def _select_jwk(domain_bundle: TrustDomainBundle, header: dict[str, Any]) -> Tru
     return key
 
 
+RSA_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512")
+EC_ALGORITHMS = ("ES256", "ES384", "ES512")
+
+
+def _allowed_algorithms(key: TrustedPublicKey) -> tuple[str, ...] | None:
+    if isinstance(key, RSAPublicKey):
+        return RSA_ALGORITHMS
+    if isinstance(key, EllipticCurvePublicKey):
+        return EC_ALGORITHMS
+    return None
+
+
 def _decode_with_key(
     token: str,
     key: TrustedPublicKey,
@@ -150,11 +162,16 @@ def _decode_with_key(
     alg = header.get("alg")
     if not isinstance(alg, str) or alg.lower() == "none":
         return _failure(AttestationError.MALFORMED_ATTESTATION, "JWS algorithm is missing or unsafe")
+    allowed = _allowed_algorithms(key)
+    if allowed is None:
+        return _failure(AttestationError.UNTRUSTED_KEY, "trusted key type is unsupported")
+    if alg not in allowed:
+        return _failure(AttestationError.MALFORMED_ATTESTATION, "JWS algorithm is not permitted for the trusted key type")
     try:
         payload = jwt.decode(
             token,
             key=key,
-            algorithms=[alg],
+            algorithms=list(allowed),
             options={"verify_aud": False, "verify_exp": False},
         )
     except jwt.InvalidSignatureError:

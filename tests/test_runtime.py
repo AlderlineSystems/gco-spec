@@ -108,7 +108,7 @@ def test_authorize_subcall_denies_authentic_expansion_with_derivation_error():
 def test_authorize_subcall_denies_unauthentic_perfect_tightening_before_validation():
     trusted = _key()
     forged = _key()
-    parent = _with_identity(make_root_gco())
+    parent = _sign(_with_identity(make_root_gco()), trusted)
     child = make_child_gco(parent)
     child = _sign(child, forged, kid="forged")
 
@@ -117,6 +117,32 @@ def test_authorize_subcall_denies_unauthentic_perfect_tightening_before_validati
     assert decision.allowed is False
     assert decision.error_code is AttestationError.UNTRUSTED_KEY
     assert decision.reason == "JWS key id is not trusted"
+
+
+def test_authorize_subcall_denies_when_parent_attestation_unverified():
+    trusted = _key()
+    forged = _key()
+    parent = _sign(_with_identity(make_root_gco()), forged, kid="forged")
+    child = make_child_gco(parent)
+    child = _sign(child, trusted)
+
+    decision = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).authorize_subcall(parent, child)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+
+
+def test_authorize_subcall_denies_synthetic_never_attested_parent():
+    key = _key()
+    parent = _with_identity(make_root_gco())
+    parent = parent.model_copy(update={"attestation": None})
+    child = make_child_gco(parent)
+    child = _sign(child, key)
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_subcall(parent, child)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.MALFORMED_ATTESTATION
 
 
 def test_authorize_subcall_malformed_input_denies_without_raise():
@@ -170,6 +196,43 @@ def test_authorize_tool_call_authentic_valid_and_invalid():
     assert absent.reason == "tool https://tools.example/missing is not delegated"
     assert exhausted.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
     assert empty_scope.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_authorize_tool_call_enforces_requested_scope_when_provided():
+    key = _key()
+    parent = _sign(
+        _with_identity(
+            make_root_gco(
+                tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="read write", max_depth=2)]
+            )
+        ),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    within_scope = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="read")
+    outside_scope = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="admin")
+
+    assert within_scope.allowed is True
+    assert outside_scope.allowed is False
+    assert outside_scope.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_authorize_tool_call_without_requested_scope_only_checks_availability():
+    key = _key()
+    parent = _sign(
+        _with_identity(
+            make_root_gco(
+                tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=2)]
+            )
+        ),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    decision = runtime.authorize_tool_call(parent, "https://tools.example/search")
+
+    assert decision.allowed is True
 
 
 def test_authorize_tool_call_unauthentic_denied_before_authority_check():
@@ -263,9 +326,37 @@ def test_authorize_state_access_append_idempotent_and_unknown_mode_denies():
     assert runtime.state_store._taints == {}
 
 
+def test_authorize_state_access_write_requires_write_grant_not_append():
+    key = _key()
+    append_only = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.APPEND)])),
+        key,
+    )
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    append_requests_write = runtime.authorize_state_access(append_only, "memory", AccessMode.WRITE)
+    append_requests_append = runtime.authorize_state_access(append_only, "memory", AccessMode.APPEND)
+    writer_requests_write = runtime.authorize_state_access(writer, "memory", AccessMode.WRITE)
+
+    assert append_requests_write.allowed is False
+    assert append_requests_write.reason == "write denied for namespace memory"
+    assert append_requests_append.allowed is True
+    assert writer_requests_write.allowed is True
+
+
 @pytest.mark.parametrize("granted_mode", [AccessMode.NONE, AccessMode.READ, AccessMode.APPEND, AccessMode.WRITE])
 @pytest.mark.parametrize("requested_mode", [AccessMode.READ, AccessMode.WRITE, AccessMode.APPEND])
-def test_authorize_state_access_matches_store_permission_gate(granted_mode: AccessMode, requested_mode: AccessMode):
+def test_authorize_state_access_is_at_least_as_strict_as_store_permission_gate(
+    granted_mode: AccessMode, requested_mode: AccessMode
+):
+    # The runtime gate requires granted_rank >= requested_rank (strict rank comparison).
+    # The store's own write() gate is coarser (WRITE and APPEND grants can both call
+    # write()), so the runtime must never be more permissive than the store, but it can
+    # be stricter (e.g. an APPEND grant no longer satisfies a WRITE request here).
     key = _key()
     namespace = "memory"
     store = GovernedStateStore()
@@ -291,7 +382,8 @@ def test_authorize_state_access_matches_store_permission_gate(granted_mode: Acce
     else:
         store_allowed = True
 
-    assert decision.allowed is store_allowed
+    if decision.allowed:
+        assert store_allowed is True
 
 
 def test_authorize_state_access_ungranted_namespace_reason():
@@ -390,6 +482,39 @@ def test_derive_for_subcall_denies_untrusted_minted_attestation_and_missing_auth
     assert missing_authority.reason == "attestation authority is not configured"
 
 
+def test_derive_for_subcall_denies_synthetic_never_attested_parent():
+    key = _key()
+    parent = _with_identity(make_root_gco()).model_copy(update={"attestation": None})
+    runtime = GovernanceRuntime(_bundle(key), attestation_authority=SigningAuthority(key), now=lambda: NOW)
+    request = DelegationRequest(
+        tool_authority=[],
+        state_access_permissions=[],
+        requested_expiry=NOW + timedelta(minutes=30),
+    )
+
+    decision = runtime.derive_for_subcall(parent, request)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_derive_for_subcall_denies_when_parent_attestation_untrusted():
+    trusted = _key()
+    forged = _key()
+    parent = _sign(_with_identity(make_root_gco()), forged, kid="forged")
+    runtime = GovernanceRuntime(_bundle(trusted), attestation_authority=SigningAuthority(trusted), now=lambda: NOW)
+    request = DelegationRequest(
+        tool_authority=[],
+        state_access_permissions=[],
+        requested_expiry=NOW + timedelta(minutes=30),
+    )
+
+    decision = runtime.derive_for_subcall(parent, request)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+
+
 def test_derive_for_subcall_malformed_request_unexpected_error_and_default_reason():
     class ExplodingAuthority:
         def issue(self, identity: str, gco_data: dict) -> AttestationModel:
@@ -411,3 +536,124 @@ def test_derive_for_subcall_malformed_request_unexpected_error_and_default_reaso
     assert exploded.error_code is DerivationError.GCO_MALFORMED
     assert exploded.reason == "derive boom"
     assert default_reason.reason == DerivationError.EXPIRED.value
+
+
+def test_authorize_tool_call_requested_scope_subset_allowed_and_superset_denied():
+    key = _key()
+    parent = _sign(_with_identity(make_root_gco()), key)
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW)
+
+    subset = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="read")
+    exact = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="read write")
+    superset = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="admin")
+    mixed = runtime.authorize_tool_call(parent, "https://tools.example/search", requested_scope="read admin")
+
+    assert subset.allowed is True
+    assert exact.allowed is True
+    assert superset.allowed is False
+    assert superset.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+    assert mixed.allowed is False
+    assert mixed.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_authorize_tool_call_requested_scope_requires_remaining_depth():
+    key = _key()
+    exhausted = _sign(
+        _with_identity(
+            make_root_gco(tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=0)])
+        ),
+        key,
+    )
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_tool_call(
+        exhausted, "https://tools.example/search", requested_scope="read"
+    )
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_authorize_subcall_denies_unattested_parent():
+    trusted = _key()
+    forged = _key()
+    parent = _with_identity(make_root_gco())
+    child = _sign(make_child_gco(parent), trusted)
+    forged_parent = _sign(parent, forged, kid="forged")
+
+    decision = GovernanceRuntime(_bundle(trusted), now=lambda: NOW).authorize_subcall(forged_parent, child)
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+
+
+def test_derive_for_subcall_denies_unattested_parent():
+    trusted = _key()
+    forged = _key()
+    parent = _sign(_with_identity(make_root_gco()), forged, kid="forged")
+    runtime = GovernanceRuntime(_bundle(trusted), attestation_authority=SigningAuthority(trusted), now=lambda: NOW)
+
+    decision = runtime.derive_for_subcall(parent, DelegationRequest(requested_expiry=NOW + timedelta(minutes=30)))
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+
+
+def test_read_state_and_write_state_round_trip():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    written = runtime.write_state(writer, "memory", "answer", b"42")
+    read = runtime.read_state(writer, "memory", "answer")
+
+    assert written == Decision(allowed=True)
+    assert read.allowed is True
+    assert read.value == b"42"
+
+
+def test_write_state_denies_read_only_grant_and_read_state_denies_undelegated():
+    key = _key()
+    store = GovernedStateStore()
+    reader = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    denied_write = runtime.write_state(reader, "memory", "answer", b"42")
+    denied_read = runtime.read_state(reader, "missing", "answer")
+
+    assert denied_write.allowed is False
+    assert denied_write.error_code is NamespaceAccessDenied
+    assert denied_read.allowed is False
+    assert denied_read.error_code is NamespaceAccessDenied
+    assert store._values == {}
+
+
+def test_read_state_missing_key_and_write_state_unauthentic_deny():
+    trusted = _key()
+    forged = _key()
+    store = GovernedStateStore()
+    reader = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)])),
+        trusted,
+    )
+    forged_writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        forged,
+        kid="forged",
+    )
+    runtime = GovernanceRuntime(_bundle(trusted), state_store=store, now=lambda: NOW)
+
+    missing = runtime.read_state(reader, "memory", "never-written")
+    unauthentic = runtime.write_state(forged_writer, "memory", "answer", b"42")
+
+    assert missing.allowed is False
+    assert missing.error_code is NamespaceAccessDenied
+    assert unauthentic.allowed is False
+    assert unauthentic.error_code is AttestationError.UNTRUSTED_KEY
+    assert store._values == {}

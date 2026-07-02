@@ -46,13 +46,20 @@ class GovernedStateStore:
         stored_taint = self._taints[storage_key]
         stored_rank = _taint_rank(stored_taint)
         sanitized_rank = _taint_rank(TaintPolicy.SANITIZED)
-        # The store enforces quarantine plus unknown-fails-closed only. Reader-vs-data
-        # taint alignment beyond quarantine is handled at grant validation today.
+        # The store enforces quarantine (unknown/TAINTED/ISOLATED fails closed) plus
+        # reader-vs-data taint alignment: a reader may only receive data whose stored
+        # taint rank is no higher than the taint rank of its own grant.
         if stored_rank is None or sanitized_rank is None or stored_rank > sanitized_rank:
+            raise TaintedStateRead(f"tainted state rejected for {namespace}/{key}")
+        permission_rank = _taint_rank(permission.taint_policy)
+        if permission_rank is None or stored_rank > permission_rank:
             raise TaintedStateRead(f"tainted state rejected for {namespace}/{key}")
         return self._values[storage_key]
 
-    def get_taint(self, namespace: str, key: str) -> TaintPolicy:
+    def get_taint(self, namespace: str, key: str, gco: GCO) -> TaintPolicy:
+        permission = self._permission_for(namespace, gco)
+        if permission.access_mode is AccessMode.NONE:
+            raise NamespaceAccessDenied(f"read denied for namespace {namespace}")
         storage_key = (namespace, key)
         if storage_key not in self._taints:
             raise StateKeyNotFound(f"state key {namespace}/{key} was not found")

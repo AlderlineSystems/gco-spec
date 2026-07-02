@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from gco.attestation import AttestationError, AttestationVerifier
 from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivationRuntime
 from gco.models import AccessMode, GCO
-from gco.state_store import GovernedStateStore, NamespaceAccessDenied
+from gco.state_store import GovernedStateStore, NamespaceAccessDenied, StateKeyNotFound, TaintedStateRead
 from gco.trust import TrustBundle
-from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_rank
+from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_rank, _scope_is_subset
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,7 @@ class Decision:
     reason: str | None = None
     error_code: Any = None
     child: GCO | None = None
+    value: bytes | None = None
 
 
 class GovernanceRuntime:
@@ -43,11 +44,15 @@ class GovernanceRuntime:
 
     def authorize_subcall(self, parent: Any, child: Any) -> Decision:
         try:
+            parent_gco = self._coerce_gco(parent)
+            parent_verified = self.verifier.verify(parent_gco.attestation, parent_gco)
+            if not parent_verified.verified:
+                return self._deny(parent_verified.error_code, parent_verified.message)
             child_gco = self._coerce_gco(child)
             verified = self.verifier.verify(child_gco.attestation, child_gco)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
-            self.validator.validate(parent, child_gco)
+            self.validator.validate(parent_gco, child_gco)
         except GCODerivationException as exc:
             return self._deny(exc.error, str(exc))
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
@@ -56,7 +61,15 @@ class GovernanceRuntime:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         return Decision(allowed=True)
 
-    def authorize_tool_call(self, gco: Any, tool_uri: str) -> Decision:
+    def authorize_tool_call(self, gco: Any, tool_uri: str, requested_scope: str | None = None) -> Decision:
+        """Authorize a tool call.
+
+        When ``requested_scope`` is omitted, this only checks that the tool is
+        available (delegated with remaining depth and a non-empty scope) -- it
+        does NOT check that any particular operation is within scope. Callers
+        that need to authorize a specific operation must pass
+        ``requested_scope`` so it can be checked against the grant's scope.
+        """
         try:
             subject = self._coerce_gco(gco)
             verified = self.verifier.verify(subject.attestation, subject)
@@ -64,8 +77,16 @@ class GovernanceRuntime:
                 return self._deny(verified.error_code, verified.message)
             for authority in subject.tool_authority:
                 if str(authority.tool_uri) == str(tool_uri) and authority.max_depth > 0:
-                    if authority.scope.strip():
+                    if not authority.scope.strip():
+                        continue
+                    if requested_scope is None:
                         return Decision(allowed=True)
+                    if _scope_is_subset(requested_scope, authority.scope):
+                        return Decision(allowed=True)
+                    return self._deny(
+                        DerivationError.TOOL_AUTHORITY_EXPANDED,
+                        f"scope {requested_scope!r} exceeds grant for tool {tool_uri}",
+                    )
             return self._deny(DerivationError.TOOL_AUTHORITY_EXPANDED, f"tool {tool_uri} is not delegated")
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
@@ -94,9 +115,46 @@ class GovernanceRuntime:
             if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
             # This seam checks only the ACL grant; taint and per-key state are enforced by the store at real access time.
-            minimum_rank = _access_rank(AccessMode.READ if requested_mode is AccessMode.READ else AccessMode.APPEND)
-            if minimum_rank is None or granted_rank < minimum_rank:
+            if granted_rank < requested_rank:
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
+        except (ValidationError, TypeError, ValueError, AttributeError) as exc:
+            return self._deny(DerivationError.GCO_MALFORMED, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return self._deny(DerivationError.GCO_MALFORMED, str(exc))
+        return Decision(allowed=True)
+
+    def read_state(self, gco: Any, namespace: str, key: str) -> Decision:
+        try:
+            subject = self._coerce_gco(gco)
+            verified = self.verifier.verify(subject.attestation, subject)
+            if not verified.verified:
+                return self._deny(verified.error_code, verified.message)
+            access = self.authorize_state_access(subject, namespace, AccessMode.READ)
+            if not access.allowed:
+                return access
+            value = self.state_store.read(namespace, key, subject)
+        except (NamespaceAccessDenied, StateKeyNotFound) as exc:
+            return self._deny(NamespaceAccessDenied, str(exc))
+        except TaintedStateRead as exc:
+            return self._deny(TaintedStateRead, str(exc))
+        except (ValidationError, TypeError, ValueError, AttributeError) as exc:
+            return self._deny(DerivationError.GCO_MALFORMED, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return self._deny(DerivationError.GCO_MALFORMED, str(exc))
+        return Decision(allowed=True, value=value)
+
+    def write_state(self, gco: Any, namespace: str, key: str, value: bytes) -> Decision:
+        try:
+            subject = self._coerce_gco(gco)
+            verified = self.verifier.verify(subject.attestation, subject)
+            if not verified.verified:
+                return self._deny(verified.error_code, verified.message)
+            access = self.authorize_state_access(subject, namespace, AccessMode.WRITE)
+            if not access.allowed:
+                return access
+            self.state_store.write(namespace, key, value, subject)
+        except NamespaceAccessDenied as exc:
+            return self._deny(NamespaceAccessDenied, str(exc))
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -108,6 +166,9 @@ class GovernanceRuntime:
             if self.attestation_authority is None:
                 return self._deny(AttestationError.MALFORMED_ATTESTATION, "attestation authority is not configured")
             parent_gco = self._coerce_gco(parent)
+            parent_verified = self.verifier.verify(parent_gco.attestation, parent_gco)
+            if not parent_verified.verified:
+                return self._deny(parent_verified.error_code, parent_verified.message)
             delegation_request = request if isinstance(request, DelegationRequest) else DelegationRequest.model_validate(request)
             child = GCODerivationRuntime(self.attestation_authority).derive(parent_gco, delegation_request)
             verified = self.verifier.verify(child.attestation, child)

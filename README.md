@@ -23,7 +23,7 @@ The intended build order is validator, derivation runtime, state store, then DER
 
 The state store enforces a binary quarantine gate: `clean` and `sanitized` state may be read, while `tainted`, `isolated`, and unknown or unrankable taint labels fail closed. Stored taint is monotonic across overwrites, so later writes cannot launder a key back to a lower taint rank.
 
-Reader-vs-data taint alignment beyond that quarantine gate is not enforced by `src/gco/state_store.py`; grant-time validation in `src/gco/validator.py` owns taint narrowing today. Per-read alignment may be added as future work if the spec requires it.
+Per-read reader-vs-data taint alignment is enforced in `src/gco/state_store.py`: a reader may only receive data whose stored taint rank is no higher than its own grant. Grant-time validation in `src/gco/validator.py` still owns taint narrowing at delegation time.
 
 ## Cryptographic Verification
 
@@ -32,3 +32,11 @@ The supported attestation formats are `jwt-svid`, `x509-svid`, `raw-jws`, and `t
 `jwt-svid` and `x509-svid` attestations are cryptographically verified by `src/gco/attestation.py` against an offline `TrustBundle`: signature or chain trust, SPIFFE identity binding, canonical GCO digest binding, and expiry are checked before the runtime seam allows authority to be used.
 
 `raw-jws` and `tpm-quote` are declared formats but are not cryptographically verified by this reference implementation. They fail closed as unsupported at the verifier/runtime seam until a dedicated verifier exists.
+
+## Security enforcement
+
+**Use `GovernanceRuntime` as the authority gate.** The package also exports `GCOValidator`, `GovernedStateStore`, `GCODerivationRuntime`, and `AttestationVerifier` for testing and composition, but calling them directly bypasses attestation verification. Production hosts should route tool calls, sub-call authorization, derivation, and state access through `GovernanceRuntime` methods (`authorize_tool_call`, `authorize_subcall`, `derive_for_subcall`, `read_state`, `write_state`).
+
+**State access is two-step by design.** `authorize_state_access()` checks ACL grants only; `read_state()` / `write_state()` also enforce per-key taint at access time. Do not call `GovernedStateStore` directly from host code.
+
+**Attestation verification limits.** JWT verification pins algorithms to the trusted key type, binds attestations to `canonical_gco_hash(gco)`, and checks `exp` against the injected clock. `aud` (audience) is not verified (`verify_aud: False`), and there is no revocation or `jti` replay cache — a valid `(GCO, attestation)` pair may be replayed until expiry.

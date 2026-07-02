@@ -551,6 +551,67 @@ def test_x509_svid_bad_signature_returns_unverified_signature(valid_root_gco):
     assert result.error_code is AttestationError.UNVERIFIED_SIGNATURE
 
 
+def test_decode_with_key_ignores_attacker_controlled_header_alg_for_rsa_key():
+    # The allowlist must be derived from the key TYPE, not the attacker-controlled
+    # header 'alg' claim. Passing a header alg outside the RSA allowlist must be
+    # rejected without ever calling jwt.decode with that untrusted algorithm name.
+    key = _rsa_key()
+
+    result = attestation_module._decode_with_key("a.b.c", key.public_key(), {"alg": "HS256"})
+
+    assert result.verified is False
+    assert result.error_code in (AttestationError.UNVERIFIED_SIGNATURE, AttestationError.MALFORMED_ATTESTATION)
+
+
+def test_decode_with_key_rejects_alg_not_in_key_type_allowlist():
+    key = _rsa_key()
+
+    result = attestation_module._decode_with_key("token", key.public_key(), {"alg": "ES256"})
+
+    assert result.verified is False
+    assert result.error_code in (AttestationError.UNVERIFIED_SIGNATURE, AttestationError.MALFORMED_ATTESTATION)
+
+
+def test_decode_with_key_allows_only_key_type_matched_algorithms(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    # A legitimate RS256 token must still verify when the allowlist is derived
+    # from the RSA key type (regression guard for the alg-pinning fix).
+    token = jwt.encode(_claims(gco), key, algorithm="RS256", headers={"kid": "jwt-key"})
+
+    result = _verify(
+        AttestationModel(format=AttestationFormat.JWT_SVID, value=token),
+        gco,
+        _trust_bundle_for_jwt(key),
+    )
+
+    assert result.verified is True
+
+
+def test_decode_with_key_derives_allowlist_from_ec_key_type():
+    key = _ec_key()
+    jwk = json.loads(jwt.algorithms.ECAlgorithm.to_jwk(key.public_key()))
+    jwk.update({"kid": "ec-key", "alg": "ES256", "use": "sig"})
+    token = jwt.encode({"sub": "x", "gco_hash": "y", "exp": 9999999999}, key, algorithm="ES256", headers={"kid": "ec-key"})
+
+    allowed = attestation_module._decode_with_key(token, key.public_key(), {"alg": "ES256"})
+    denied = attestation_module._decode_with_key(token, key.public_key(), {"alg": "RS256"})
+
+    assert isinstance(allowed, dict)
+    assert isinstance(denied, attestation_module.VerificationResult)
+    assert denied.verified is False
+
+
+def test_decode_with_key_rejects_unsupported_key_type(monkeypatch):
+    class BogusKey:
+        pass
+
+    result = attestation_module._decode_with_key("a.b.c", BogusKey(), {"alg": "RS256"})
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
 def test_ec_jwk_is_loaded_and_verifies(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _ec_key()
@@ -565,3 +626,44 @@ def test_ec_jwk_is_loaded_and_verifies(valid_root_gco):
     )
 
     assert result.verified is True
+
+
+def test_decode_with_key_rejects_algorithm_not_allowed_for_key_type():
+    rsa_result = attestation_module._decode_with_key("token", _rsa_key().public_key(), {"alg": "ES256"})
+    ec_result = attestation_module._decode_with_key("token", _ec_key().public_key(), {"alg": "RS256"})
+    hmac_result = attestation_module._decode_with_key("token", _rsa_key().public_key(), {"alg": "HS256"})
+
+    for result in (rsa_result, ec_result, hmac_result):
+        assert result.verified is False
+        assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+        assert result.message == "JWS algorithm is not permitted for the trusted key type"
+
+
+def test_decode_with_key_rejects_unsupported_key_type():
+    result = attestation_module._decode_with_key("token", _dsa_key().public_key(), {"alg": "RS256"})
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.UNTRUSTED_KEY
+
+
+def test_jwt_svid_ps256_verifies_with_rsa_trust_anchor(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    token = jwt.encode(_claims(gco), key, algorithm="PS256", headers={"kid": "jwt-key"})
+
+    result = _verify(AttestationModel(format=AttestationFormat.JWT_SVID, value=token), gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_header_alg_cannot_select_foreign_algorithm(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    rsa_key = _rsa_key()
+    ec_key = _ec_key()
+    token = jwt.encode(_claims(gco), ec_key, algorithm="ES256", headers={"kid": "jwt-key"})
+
+    result = _verify(AttestationModel(format=AttestationFormat.JWT_SVID, value=token), gco, _trust_bundle_for_jwt(rsa_key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+    assert result.message == "JWS algorithm is not permitted for the trusted key type"

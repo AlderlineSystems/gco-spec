@@ -54,7 +54,8 @@ except Exception as e:  # noqa: BLE001
 # --- Attack 2: get_taint on a key that was never written --------------------
 try:
     store = GovernedStateStore()
-    out = store.get_taint("ns", "never-written")
+    g = gco_with(StatePermission(namespace="ns", access_mode=AccessMode.READ, taint_policy=TaintPolicy.CLEAN))
+    out = store.get_taint("ns", "never-written", g)
     record("get_taint-missing-key", False, f"returned {out!r} for a key never written")
 except KeyError as e:
     record("get_taint-missing-key", False, f"UNCAUGHT KeyError: {e}")
@@ -78,7 +79,7 @@ try:
     )
     store.write("ns", "k", b"secret", tainted_writer)          # quarantined
     store.write("ns", "k", b"laundered", clean_writer)         # overwrite as clean
-    taint_after = store.get_taint("ns", "k")
+    taint_after = store.get_taint("ns", "k", clean_writer)
     served = store.read("ns", "k", clean_writer)               # now readable?
     record(
         "taint-laundering-overwrite",
@@ -156,9 +157,9 @@ except Exception as e:  # noqa: BLE001
 
 
 # --- Attack 8: sanitized data read by a clean-expecting reader --------------
-# Sub-call writes SANITIZED. A reader granted CLEAN reads it. Is the reader's
-# expected taint level enforced (alignment), or is sanitized silently consumed
-# into a clean context?
+# Sub-call writes SANITIZED. A reader granted CLEAN reads it. The reader's
+# expected taint level is now enforced (alignment): a CLEAN-policy reader may
+# not receive data whose stored taint rank exceeds its own grant's taint rank.
 try:
     store = GovernedStateStore()
     sani_writer = gco_with(
@@ -171,9 +172,8 @@ try:
     served = store.read("ns", "k", clean_reader)
     record(
         "sanitized-read-by-clean-reader",
-        None,
-        f"clean reader received SANITIZED data {served!r}; reader taint_policy is never "
-        f"consulted on read (no alignment check)",
+        False,
+        f"clean reader received SANITIZED data {served!r}; taint alignment check did not fire",
     )
 except TaintedStateRead:
     record("sanitized-read-by-clean-reader", True, "blocked for taint alignment")

@@ -151,3 +151,59 @@ def test_expired_parent_cannot_mint_valid_child(valid_root_gco):
 def test_delegation_request_rejects_non_utc_expiry():
     with pytest.raises(ValidationError):
         DelegationRequest(requested_expiry=BASE_TIME.astimezone(timezone(timedelta(hours=2))))
+
+
+def test_derive_rejects_duplicate_namespace_in_request(valid_root_gco):
+    request = _request(
+        permissions=[
+            StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.CLEAN),
+            StatePermission(namespace="memory", access_mode=AccessMode.NONE, taint_policy=TaintPolicy.CLEAN),
+        ],
+    )
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCODerivationRuntime(MockAttestationAuthority()).derive(valid_root_gco, request)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
+def test_derive_rejects_duplicate_tool_uri_in_request(valid_root_gco):
+    request = _request(
+        tools=[
+            ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=0),
+            ToolAuthority(tool_uri="https://tools.example/search", scope="write", max_depth=0),
+        ],
+    )
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCODerivationRuntime(MockAttestationAuthority()).derive(valid_root_gco, request)
+
+    assert exc_info.value.error is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_derive_rejects_duplicate_namespace_in_parent(valid_root_gco):
+    parent_permissions = [
+        *valid_root_gco.state_access_permissions,
+        StatePermission(namespace="memory", access_mode=AccessMode.NONE),
+    ]
+    parent = valid_root_gco.model_copy(update={"state_access_permissions": parent_permissions})
+    request = _request(permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)])
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCODerivationRuntime(MockAttestationAuthority()).derive(parent, request)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
+def test_derive_rejects_duplicate_tool_uri_in_parent(valid_root_gco):
+    parent_tools = [
+        *valid_root_gco.tool_authority,
+        ToolAuthority(tool_uri="https://tools.example/search", scope="read write", max_depth=2),
+    ]
+    parent = valid_root_gco.model_copy(update={"tool_authority": parent_tools})
+    request = _request(tools=[ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=1)])
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCODerivationRuntime(MockAttestationAuthority()).derive(parent, request)
+
+    assert exc_info.value.error is DerivationError.TOOL_AUTHORITY_EXPANDED

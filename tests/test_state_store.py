@@ -21,7 +21,7 @@ def test_write_read_and_get_taint():
     store.write("memory", "answer", b"42", gco)
 
     assert store.read("memory", "answer", gco) == b"42"
-    assert store.get_taint("memory", "answer") is TaintPolicy.CLEAN
+    assert store.get_taint("memory", "answer", gco) is TaintPolicy.CLEAN
 
 
 def test_write_rejects_missing_namespace(valid_root_gco):
@@ -87,11 +87,32 @@ def test_read_rejects_value_without_taint_with_controlled_error():
 
 def test_get_taint_rejects_missing_key_with_controlled_error():
     store = GovernedStateStore()
+    gco = _gco_with_permissions(StatePermission(namespace="memory", access_mode=AccessMode.READ))
 
     with pytest.raises(StateKeyNotFound, match="state key memory/missing was not found") as exc_info:
-        store.get_taint("memory", "missing")
+        store.get_taint("memory", "missing", gco)
 
     assert isinstance(exc_info.value, NamespaceAccessDenied)
+
+
+def test_get_taint_rejects_ungranted_namespace():
+    store = GovernedStateStore()
+    writer = _gco_with_permissions(StatePermission(namespace="memory", access_mode=AccessMode.WRITE))
+    store.write("memory", "answer", b"42", writer)
+    outsider = _gco_with_permissions(StatePermission(namespace="other", access_mode=AccessMode.READ))
+
+    with pytest.raises(NamespaceAccessDenied, match="namespace memory is not delegated"):
+        store.get_taint("memory", "answer", outsider)
+
+
+def test_get_taint_rejects_none_access():
+    store = GovernedStateStore()
+    writer = _gco_with_permissions(StatePermission(namespace="memory", access_mode=AccessMode.WRITE))
+    store.write("memory", "answer", b"42", writer)
+    blocked = _gco_with_permissions(StatePermission(namespace="memory", access_mode=AccessMode.NONE))
+
+    with pytest.raises(NamespaceAccessDenied):
+        store.get_taint("memory", "answer", blocked)
 
 
 def test_taint_laundering_overwrite_keeps_higher_stored_taint():
@@ -108,7 +129,7 @@ def test_taint_laundering_overwrite_keeps_higher_stored_taint():
 
     with pytest.raises(TaintedStateRead, match="tainted state rejected for memory/answer"):
         store.read("memory", "answer", clean_writer)
-    assert _taint_rank(store.get_taint("memory", "answer")) >= _taint_rank(TaintPolicy.TAINTED)
+    assert _taint_rank(store.get_taint("memory", "answer", tainted_writer)) >= _taint_rank(TaintPolicy.TAINTED)
 
 
 def test_higher_taint_allows_sanitized_over_clean_and_preserves_unknown_existing_taint():
@@ -119,15 +140,22 @@ def test_higher_taint_allows_sanitized_over_clean_and_preserves_unknown_existing
     sanitized_writer = _gco_with_permissions(
         StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.SANITIZED)
     )
+    sanitized_reader = _gco_with_permissions(
+        StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.SANITIZED)
+    )
 
     store.write("memory", "answer", b"clean", clean_writer)
     store.write("memory", "answer", b"sanitized", sanitized_writer)
-    assert store.read("memory", "answer", clean_writer) == b"sanitized"
-    assert store.get_taint("memory", "answer") is TaintPolicy.SANITIZED
+    # A CLEAN-policy writer is not permitted to read back SANITIZED data (taint alignment).
+    with pytest.raises(TaintedStateRead):
+        store.read("memory", "answer", clean_writer)
+    # A SANITIZED-policy reader may read it.
+    assert store.read("memory", "answer", sanitized_reader) == b"sanitized"
+    assert store.get_taint("memory", "answer", clean_writer) is TaintPolicy.SANITIZED
 
     store._taints[("memory", "answer")] = "superbad"
     store.write("memory", "answer", b"clean-again", clean_writer)
-    assert store.get_taint("memory", "answer") == "superbad"
+    assert store.get_taint("memory", "answer", clean_writer) == "superbad"
 
 
 def test_unknown_writer_taint_over_existing_clean_key_fails_closed():
@@ -143,7 +171,7 @@ def test_unknown_writer_taint_over_existing_clean_key_fails_closed():
     store.write("memory", "answer", b"clean", clean_writer)
     store.write("memory", "answer", b"unknown", unknown_writer)
 
-    assert store.get_taint("memory", "answer") == "superbad"
+    assert store.get_taint("memory", "answer", clean_writer) == "superbad"
     with pytest.raises(TaintedStateRead, match="tainted state rejected for memory/answer"):
         store.read("memory", "answer", clean_writer)
 
@@ -159,6 +187,33 @@ def test_unknown_taint_policy_at_read_gate_is_blocked():
 
     with pytest.raises(TaintedStateRead, match="tainted state rejected for memory/answer"):
         store.read("memory", "answer", gco)
+
+
+def test_read_rejects_clean_reader_for_sanitized_data():
+    store = GovernedStateStore()
+    sanitized_writer = _gco_with_permissions(
+        StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.SANITIZED)
+    )
+    clean_reader = _gco_with_permissions(
+        StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.CLEAN)
+    )
+    store.write("memory", "answer", b"42", sanitized_writer)
+
+    with pytest.raises(TaintedStateRead, match="tainted state rejected for memory/answer"):
+        store.read("memory", "answer", clean_reader)
+
+
+def test_read_allows_sanitized_reader_for_sanitized_data():
+    store = GovernedStateStore()
+    sanitized_writer = _gco_with_permissions(
+        StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.SANITIZED)
+    )
+    sanitized_reader = _gco_with_permissions(
+        StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.SANITIZED)
+    )
+    store.write("memory", "answer", b"42", sanitized_writer)
+
+    assert store.read("memory", "answer", sanitized_reader) == b"42"
 
 
 def test_read_rejects_isolated_state():

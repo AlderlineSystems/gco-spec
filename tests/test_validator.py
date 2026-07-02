@@ -185,6 +185,88 @@ def test_validator_allows_omitted_delegations(valid_root_gco, valid_child_gco):
     assert GCOValidator().validate(valid_root_gco, child) is True
 
 
+def test_validate_rejects_duplicate_state_namespace_in_child(valid_root_gco, valid_child_gco):
+    child = valid_child_gco(valid_root_gco)
+    permissions = [
+        *child.state_access_permissions,
+        StatePermission(namespace="memory", access_mode=AccessMode.NONE),
+    ]
+    child = child.model_copy(update={"state_access_permissions": permissions})
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator().validate(valid_root_gco, child)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
+def test_validate_rejects_duplicate_state_namespace_in_parent(valid_root_gco, valid_child_gco):
+    parent_permissions = [
+        *valid_root_gco.state_access_permissions,
+        StatePermission(namespace="memory", access_mode=AccessMode.NONE),
+    ]
+    parent = valid_root_gco.model_copy(update={"state_access_permissions": parent_permissions})
+    child = valid_child_gco(parent)
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator().validate(parent, child)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
+def test_validate_rejects_duplicate_tool_uri_in_child(valid_root_gco, valid_child_gco):
+    child = valid_child_gco(valid_root_gco)
+    tools = [
+        *child.tool_authority,
+        ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=0),
+    ]
+    child = child.model_copy(update={"tool_authority": tools})
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator().validate(valid_root_gco, child)
+
+    assert exc_info.value.error is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_validate_rejects_duplicate_tool_uri_in_parent(valid_root_gco, valid_child_gco):
+    parent_tools = [
+        *valid_root_gco.tool_authority,
+        ToolAuthority(tool_uri="https://tools.example/search", scope="read write", max_depth=2),
+    ]
+    parent = valid_root_gco.model_copy(update={"tool_authority": parent_tools})
+    child = valid_child_gco(parent)
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator().validate(parent, child)
+
+    assert exc_info.value.error is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
+def test_validate_root_rejects_duplicate_state_namespace(valid_root_gco):
+    permissions = [
+        *valid_root_gco.state_access_permissions,
+        StatePermission(namespace="memory", access_mode=AccessMode.NONE),
+    ]
+    root = valid_root_gco.model_copy(update={"state_access_permissions": permissions})
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator(now=lambda: BASE_TIME - timedelta(days=1)).validate_root(root)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
+def test_validate_root_rejects_duplicate_tool_uri(valid_root_gco):
+    tools = [
+        *valid_root_gco.tool_authority,
+        ToolAuthority(tool_uri="https://tools.example/search", scope="read write", max_depth=2),
+    ]
+    root = valid_root_gco.model_copy(update={"tool_authority": tools})
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator(now=lambda: BASE_TIME - timedelta(days=1)).validate_root(root)
+
+    assert exc_info.value.error is DerivationError.TOOL_AUTHORITY_EXPANDED
+
+
 def test_root_validation_accepts_root_gco(valid_root_gco):
     assert GCOValidator(now=lambda: BASE_TIME - timedelta(days=1)).validate_root(valid_root_gco) is True
 

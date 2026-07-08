@@ -58,7 +58,7 @@ class GovernedStateStore:
 
     def get_taint(self, namespace: str, key: str, gco: GCO) -> TaintPolicy:
         permission = self._permission_for(namespace, gco)
-        if permission.access_mode is AccessMode.NONE:
+        if permission.access_mode not in {AccessMode.READ, AccessMode.WRITE}:
             raise NamespaceAccessDenied(f"read denied for namespace {namespace}")
         storage_key = (namespace, key)
         if storage_key not in self._taints:

@@ -1,6 +1,6 @@
 # GCO Reference Implementation
 
-Reference Python implementation for the Sovereign Safety Labs SSL-TS-2026-001 GCO derivation contract.
+Reference Python implementation for the Alderline Systems SSL-TS-2026-001 GCO derivation contract.
 
 ## Components
 

@@ -313,6 +313,10 @@ def test_jwt_svid_out_of_range_time_claim_rejected(claim, valid_root_gco):
     assert result.error_code is AttestationError.MALFORMED_ATTESTATION
 
 
+def test_non_finite_numeric_date_is_rejected():
+    assert attestation_module._numeric_date(float("inf")) is None
+
+
 def test_jwt_svid_missing_exp_is_malformed(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()

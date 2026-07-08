@@ -82,6 +82,12 @@ def _unsigned_token(header: dict, payload: dict | list) -> str:
     return f"{_b64_json(header)}.{_b64_json(payload)}."
 
 
+def _token_with_corrupted_signature(token: str) -> str:
+    head, payload, signature = token.split(".")
+    replacement = "A" if signature[0] != "A" else "B"
+    return f"{head}.{payload}.{replacement}{signature[1:]}"
+
+
 def test_jwt_svid_happy_path(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()
@@ -154,8 +160,7 @@ def test_jwt_svid_bad_signature_returns_unverified_signature(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()
     attestation = _jwt_attestation(gco, key)
-    head, payload, signature = attestation.value.split(".")
-    corrupted = f"{head}.{payload}.{signature[:-2]}aa"
+    corrupted = _token_with_corrupted_signature(attestation.value)
 
     result = _verify(
         AttestationModel(format=AttestationFormat.JWT_SVID, value=corrupted),
@@ -639,8 +644,7 @@ def test_x509_svid_bad_signature_returns_unverified_signature(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     _, root, _, intermediate, leaf_key, leaf = _chain()
     attestation = _x509_attestation(gco, leaf_key, leaf, intermediate)
-    head, payload, signature = attestation.value.split(".")
-    corrupted = f"{head}.{payload}.{signature[:-2]}aa"
+    corrupted = _token_with_corrupted_signature(attestation.value)
 
     result = _verify(AttestationModel(format=AttestationFormat.X509_SVID, value=corrupted), gco, _trust_bundle_for_ca(root))
 

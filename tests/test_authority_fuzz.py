@@ -22,7 +22,7 @@ def _random_parent(rng: random.Random) -> GCO:
         span_id=uuid4(),
         parent_span_id=None,
         policy_id="policy",
-        model_identity="model",
+        model_identity="spiffe://example.org/model/fuzz",
         intervention_version="intervention",
         tool_authority=[
             ToolAuthority(

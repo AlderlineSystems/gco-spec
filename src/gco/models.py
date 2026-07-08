@@ -87,6 +87,11 @@ class GCO(StrictBaseModel):
     lineage: list[str] = Field(default_factory=list)
     attestation: Optional[AttestationModel]
 
+    @field_validator("model_identity")
+    @classmethod
+    def model_identity_must_be_uri(cls, value: str) -> str:
+        return _validate_uri(value)
+
     @field_validator("expires_at")
     @classmethod
     def expires_at_must_be_utc(cls, value: datetime) -> datetime:

@@ -23,7 +23,7 @@
     "span_id": { "type": "string", "format": "uuid" },
     "parent_span_id": { "type": ["string", "null"], "format": "uuid" },
     "policy_id": { "type": "string" },
-    "model_identity": { "type": "string" },
+    "model_identity": { "type": "string", "format": "uri" },
     "intervention_version": { "type": "string" },
     "tool_authority": {
       "type": "array",

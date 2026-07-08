@@ -52,7 +52,7 @@ def test_derive_round_trips_through_validator(valid_root_gco):
     assert child.tool_authority[0].max_depth == 1
     assert child.expires_at == BASE_TIME - timedelta(hours=1)
     assert child.attestation.value == "issued-token"
-    assert authority.calls[0][0] == "model-alpha"
+    assert authority.calls[0][0] == valid_root_gco.model_identity
     assert "attestation" not in authority.calls[0][1]
 
 

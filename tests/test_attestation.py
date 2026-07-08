@@ -299,6 +299,20 @@ def test_jwt_svid_malformed_time_claim_rejected(claim, valid_root_gco):
     assert result.error_code is AttestationError.MALFORMED_ATTESTATION
 
 
+@pytest.mark.parametrize("claim", ["exp", "nbf", "iat"])
+def test_jwt_svid_out_of_range_time_claim_rejected(claim, valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims[claim] = 10**100
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
 def test_jwt_svid_missing_exp_is_malformed(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()

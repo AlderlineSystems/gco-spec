@@ -25,7 +25,7 @@ from gco.models import (
     ToolAuthority,
 )
 from gco.derivation import DelegationRequest, GCODerivationRuntime
-from gco.validator import GCODerivationException, GCOValidator, canonical_gco_hash
+from gco.validator import GCODerivationException, GCOValidator, _access_allows, canonical_gco_hash
 
 ACCESS = [AccessMode.NONE, AccessMode.READ, AccessMode.APPEND, AccessMode.WRITE]
 TAINT = [TaintPolicy.CLEAN, TaintPolicy.SANITIZED, TaintPolicy.TAINTED, TaintPolicy.ISOLATED]
@@ -60,14 +60,14 @@ def make_parent(rng: random.Random) -> GCO:
 
 def tightening_request(parent: GCO, rng: random.Random) -> DelegationRequest:
     pp = parent.state_access_permissions[0]
-    p_access = ACCESS.index(pp.access_mode)
     p_taint = TAINT.index(pp.taint_policy)
+    allowed_access = [access_mode for access_mode in ACCESS if _access_allows(pp.access_mode, access_mode)]
     return DelegationRequest(
         tool_authority=[ToolAuthority(tool_uri=TOOL, scope="read", max_depth=0)],
         state_access_permissions=[
             StatePermission(
                 namespace="ns",
-                access_mode=ACCESS[rng.randint(0, p_access)],          # <= parent
+                access_mode=rng.choice(allowed_access),
                 taint_policy=TAINT[rng.randint(p_taint, len(TAINT) - 1)],  # >= parent
             )
         ],
@@ -149,8 +149,17 @@ def main() -> None:
         print(f"  {k:18}: {v}")
     for ex in examples:
         print("   ", ex)
-    bad = c["disagree"] + c["expansion_leaked"] + c["uncaught"] + c["lineage_bad"] + c["linkage_bad"]
+    bad = (
+        c["disagree"]
+        + c["expansion_leaked"]
+        + c["uncaught"]
+        + c["lineage_bad"]
+        + c["linkage_bad"]
+        + c["over_refused"]
+    )
     print("RESULT:", "PASS" if bad == 0 else f"**FAIL** ({bad} property violations)")
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

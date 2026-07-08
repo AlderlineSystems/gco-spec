@@ -57,7 +57,7 @@ The supported attestation formats are `jwt-svid`, `x509-svid`, `raw-jws`, and `t
 
 ## Security enforcement
 
-**Use `GovernanceRuntime` as the authority gate.** The package also exports `GCOValidator`, `GovernedStateStore`, `GCODerivationRuntime`, and `AttestationVerifier` for testing and composition, but calling them directly bypasses attestation verification. Production hosts should route tool calls, sub-call authorization, derivation, and state access through `GovernanceRuntime` methods (`authorize_tool_call`, `authorize_subcall`, `derive_for_subcall`, `read_state`, `write_state`).
+**Use `GovernanceRuntime` as the authority gate.** The package also exports `GCOValidator`, `GovernedStateStore`, `GCODerivationRuntime`, and `AttestationVerifier` for testing and composition, but calling them directly bypasses attestation verification. Production hosts should route tool calls, sub-call authorization, derivation, and state access through `GovernanceRuntime` methods (`authorize_tool_call`, `authorize_subcall`, `derive_for_subcall`, `read_state`, `write_state`). Use `write_state(..., mode=AccessMode.APPEND)` for append-only writes; the default `AccessMode.WRITE` remains required for overwrite-capable writes.
 
 **State access is two-step by design.** `authorize_state_access()` checks ACL grants only; `read_state()` / `write_state()` also enforce per-key taint at access time. Do not call `GovernedStateStore` directly from host code.
 

@@ -668,6 +668,70 @@ def test_read_state_and_write_state_round_trip():
     assert read.value == b"42"
 
 
+def test_write_state_append_mode_allows_new_key_and_denies_overwrite():
+    key = _key()
+    store = GovernedStateStore()
+    appender = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.APPEND)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    created = runtime.write_state(appender, "log", "entry", b"first", mode=AccessMode.APPEND)
+    overwritten = runtime.write_state(appender, "log", "entry", b"second", mode=AccessMode.APPEND)
+    write_mode = runtime.write_state(appender, "log", "other", b"second")
+
+    assert created == Decision(allowed=True)
+    assert overwritten.allowed is False
+    assert overwritten.error_code is NamespaceAccessDenied
+    assert overwritten.reason == "append denied for existing key log/entry"
+    assert write_mode.allowed is False
+    assert write_mode.error_code is NamespaceAccessDenied
+    assert store._values == {("log", "entry"): b"first"}
+
+
+def test_write_state_append_mode_narrows_write_grant_to_append_semantics():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    created = runtime.write_state(writer, "log", "entry", b"first", mode="append")
+    overwritten = runtime.write_state(writer, "log", "entry", b"second", mode="append")
+    write_mode = runtime.write_state(writer, "log", "entry", b"second")
+
+    assert created == Decision(allowed=True)
+    assert overwritten.allowed is False
+    assert overwritten.error_code is NamespaceAccessDenied
+    assert overwritten.reason == "append denied for existing key log/entry"
+    assert write_mode == Decision(allowed=True)
+    assert store._values == {("log", "entry"): b"second"}
+
+
+def test_write_state_rejects_non_write_modes():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    read_mode = runtime.write_state(writer, "memory", "answer", b"42", mode=AccessMode.READ)
+    unknown_mode = runtime.write_state(writer, "memory", "answer", b"42", mode="bogus")
+
+    assert read_mode.allowed is False
+    assert read_mode.error_code is NamespaceAccessDenied
+    assert read_mode.reason == "AccessMode.READ denied for namespace memory"
+    assert unknown_mode.allowed is False
+    assert unknown_mode.error_code is NamespaceAccessDenied
+    assert unknown_mode.reason == "bogus denied for namespace memory"
+    assert store._values == {}
+
+
 def test_write_state_denies_read_only_grant_and_read_state_denies_undelegated():
     key = _key()
     store = GovernedStateStore()

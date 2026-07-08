@@ -152,7 +152,14 @@ class GovernanceRuntime:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         return Decision(allowed=True, value=value)
 
-    def write_state(self, gco: Any, namespace: str, key: str, value: bytes) -> Decision:
+    def write_state(
+        self,
+        gco: Any,
+        namespace: str,
+        key: str,
+        value: bytes,
+        mode: str | AccessMode = AccessMode.WRITE,
+    ) -> Decision:
         try:
             subject = self._coerce_gco(gco)
             verified = self.verifier.verify(subject.attestation, subject)
@@ -161,10 +168,14 @@ class GovernanceRuntime:
             expiry = self._verify_subject_not_expired(subject)
             if expiry is not None:
                 return expiry
-            access = self.authorize_state_access(subject, namespace, AccessMode.WRITE)
+            requested_mode = self._coerce_write_mode(mode)
+            if requested_mode is None:
+                return self._deny(NamespaceAccessDenied, f"{mode} denied for namespace {namespace}")
+            access = self.authorize_state_access(subject, namespace, requested_mode)
             if not access.allowed:
                 return access
-            self.state_store.write(namespace, key, value, subject)
+            write_subject = self._subject_for_write_mode(subject, namespace, requested_mode)
+            self.state_store.write(namespace, key, value, write_subject)
         except NamespaceAccessDenied as exc:
             return self._deny(NamespaceAccessDenied, str(exc))
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
@@ -207,6 +218,26 @@ class GovernanceRuntime:
         if subject.expires_at <= self._now():
             return self._deny(DerivationError.EXPIRED)
         return None
+
+    def _coerce_write_mode(self, mode: str | AccessMode) -> AccessMode | None:
+        try:
+            requested_mode = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
+        except (TypeError, ValueError):
+            return None
+        if requested_mode not in {AccessMode.WRITE, AccessMode.APPEND}:
+            return None
+        return requested_mode
+
+    def _subject_for_write_mode(self, subject: GCO, namespace: str, mode: AccessMode) -> GCO:
+        if mode is AccessMode.WRITE:
+            return subject
+        permissions = [
+            permission.model_copy(update={"access_mode": AccessMode.APPEND})
+            if permission.namespace == namespace
+            else permission
+            for permission in subject.state_access_permissions
+        ]
+        return subject.model_copy(update={"state_access_permissions": permissions})
 
     def _deny(self, error_code: Any, reason: str | None = None) -> Decision:
         if reason is None and hasattr(error_code, "value"):

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import AnyUrl, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+
+
+_URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s\x00-\x1f\x7f]+$")
+
+
+def _validate_uri(value: str) -> str:
+    if not _URI_RE.fullmatch(value):
+        raise ValueError("must be a valid URI")
+    return value
 
 
 class AttestationFormat(str, Enum):
@@ -36,13 +46,25 @@ class StrictBaseModel(BaseModel):
 class AttestationModel(StrictBaseModel):
     format: AttestationFormat
     value: str
-    issuer: Optional[AnyUrl] = None
+    issuer: Optional[str] = None
+
+    @field_validator("issuer")
+    @classmethod
+    def issuer_must_be_uri(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _validate_uri(value)
 
 
 class ToolAuthority(StrictBaseModel):
-    tool_uri: AnyUrl
+    tool_uri: str
     scope: str
     max_depth: int = Field(ge=0)
+
+    @field_validator("tool_uri")
+    @classmethod
+    def tool_uri_must_be_uri(cls, value: str) -> str:
+        return _validate_uri(value)
 
 
 class StatePermission(StrictBaseModel):

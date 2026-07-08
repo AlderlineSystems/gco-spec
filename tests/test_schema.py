@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
-from gco.models import AttestationFormat, GCO, TaintPolicy
+from gco.models import AttestationFormat, AttestationModel, GCO, TaintPolicy, ToolAuthority
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "gco_schema_v1.json"
@@ -62,6 +63,18 @@ def test_json_schema_uri_fields_match_model_uri_contract(valid_root_gco, tool_ur
 
     assert str(parsed.tool_authority[0].tool_uri) == tool_uri
     assert str(parsed.attestation.issuer) == issuer
+
+
+@pytest.mark.parametrize("tool_uri", ["tools.example/search", "://tools.example/search", "urn:", "urn:bad value"])
+def test_model_rejects_malformed_tool_uri(tool_uri):
+    with pytest.raises(PydanticValidationError):
+        ToolAuthority(tool_uri=tool_uri, scope="read", max_depth=1)
+
+
+@pytest.mark.parametrize("issuer", ["issuer.example/gco", "://issuer.example/gco", "urn:", "urn:bad value"])
+def test_model_rejects_malformed_attestation_issuer(issuer):
+    with pytest.raises(PydanticValidationError):
+        AttestationModel(format=AttestationFormat.JWT_SVID, value="token", issuer=issuer)
 
 
 @pytest.mark.parametrize(

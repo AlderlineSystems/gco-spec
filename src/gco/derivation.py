@@ -99,9 +99,10 @@ class GCODerivationRuntime:
             parent_tool = parent_tools.get(str(requested_tool.tool_uri))
             if parent_tool is None:
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
-            child_depth = parent_tool.max_depth - 1
-            if child_depth < 0:
+            remaining_depth = parent_tool.max_depth - 1
+            if remaining_depth < 0:
                 raise GCODerivationException(DerivationError.MAX_DEPTH_INCREASED)
+            child_depth = min(requested_tool.max_depth, remaining_depth)
             if not _scope_is_subset(requested_tool.scope, parent_tool.scope):
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
             child_tools.append(

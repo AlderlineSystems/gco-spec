@@ -186,7 +186,7 @@ class GCOValidator:
             parent_tool = parent_tools.get(str(child_tool.tool_uri))
             if parent_tool is None:
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
-            if parent_tool.max_depth == 0 or child_tool.max_depth != parent_tool.max_depth - 1:
+            if parent_tool.max_depth == 0 or child_tool.max_depth > parent_tool.max_depth - 1:
                 raise GCODerivationException(DerivationError.MAX_DEPTH_INCREASED)
             if not _scope_is_subset(child_tool.scope, parent_tool.scope):
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)

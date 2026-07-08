@@ -127,6 +127,28 @@ def test_depth_exhaustion_rejected():
     assert exc_info.value.error is DerivationError.MAX_DEPTH_INCREASED
 
 
+@pytest.mark.parametrize(
+    ("requested_depth", "expected_depth"),
+    [
+        (0, 0),
+        (1, 1),
+        (99, 2),
+    ],
+)
+def test_derive_caps_tool_depth_to_request_and_parent(requested_depth, expected_depth):
+    parent = make_root_gco(
+        tool_authority=[ToolAuthority(tool_uri="https://tools.example/search", scope="read write", max_depth=3)]
+    )
+    request = _request(
+        tools=[ToolAuthority(tool_uri="https://tools.example/search", scope="read", max_depth=requested_depth)]
+    )
+
+    child = GCODerivationRuntime(MockAttestationAuthority()).derive(parent, request)
+
+    assert child.tool_authority[0].max_depth == expected_depth
+    assert GCOValidator().validate(parent, child) is True
+
+
 def test_lineage_growth_to_128_and_rejection_at_129():
     runtime = GCODerivationRuntime(MockAttestationAuthority())
     parent_at_127 = make_root_gco(lineage=[f"{index:064x}" for index in range(127)])

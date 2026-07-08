@@ -129,6 +129,8 @@ def main() -> None:
         print("   ", ex)
     bad = counts["access_violation"] + counts["taint_violation"] + counts["laundering"] + counts["uncaught"]
     print("RESULT:", "PASS" if bad == 0 else f"**FAIL** ({bad} contract violations)")
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

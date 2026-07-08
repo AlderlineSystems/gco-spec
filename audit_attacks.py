@@ -236,3 +236,5 @@ for name, verdict, detail in results:
 print("-" * 100)
 print(f"{holes} hole(s) found out of {len(results)} attacks "
       f"(note: 'None' verdicts are informational contract-drift findings)")
+if holes:
+    raise SystemExit(1)

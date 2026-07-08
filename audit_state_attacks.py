@@ -204,3 +204,5 @@ for name, verdict, detail in results:
 print("-" * 110)
 print(f"{holes} hole(s) found out of {len(results)} attacks "
       f"('None'/informational rows describe contract gaps, not crashes)")
+if holes:
+    raise SystemExit(1)

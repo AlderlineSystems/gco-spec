@@ -164,7 +164,10 @@ def main() -> None:
     print(f"uncaught exceptions:   {uncaught}")
     for example in examples:
         print("  example:", example)
-    print("RESULT:", "PASS" if unauthentic_allowed == 0 and expansion_allowed == 0 and uncaught == 0 else "**FAIL**")
+    bad = unauthentic_allowed + expansion_allowed + uncaught
+    print("RESULT:", "PASS" if bad == 0 else "**FAIL**")
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

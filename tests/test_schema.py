@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -11,10 +12,20 @@ from gco.models import AttestationFormat, AttestationModel, GCO, TaintPolicy, To
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "gco_schema_v1.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+def test_typed_package_marker_is_included_as_package_data():
+    marker_path = PROJECT_ROOT / "src" / "gco" / "py.typed"
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert marker_path.is_file()
+    assert "Typing :: Typed" in pyproject["project"]["classifiers"]
+    assert pyproject["tool"]["setuptools"]["package-data"]["gco"] == ["py.typed"]
 
 
 def test_json_schema_accepts_pydantic_gco_example(valid_root_gco):

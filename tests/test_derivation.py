@@ -56,16 +56,21 @@ def test_derive_round_trips_through_validator(valid_root_gco):
     assert "attestation" not in authority.calls[0][1]
 
 
-def test_derive_uses_explicit_identity_and_clamps_expiry(valid_root_gco):
+def test_derive_clamps_expiry(valid_root_gco):
     authority = MockAttestationAuthority()
     runtime = GCODerivationRuntime(authority)
 
-    child = runtime.derive(valid_root_gco, _request(expiry_offset=timedelta(days=1), identity="delegate"))
+    child = runtime.derive(valid_root_gco, _request(expiry_offset=timedelta(days=1)))
 
     assert child.tool_authority == []
     assert child.state_access_permissions == []
     assert child.expires_at == valid_root_gco.expires_at
-    assert authority.calls[0][0] == "delegate"
+    assert authority.calls[0][0] == valid_root_gco.model_identity
+
+
+def test_delegation_request_rejects_attestation_identity_override():
+    with pytest.raises(ValidationError):
+        _request(identity="delegate")
 
 
 @pytest.mark.parametrize(

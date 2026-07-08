@@ -31,6 +31,13 @@ class DelegationRequest(StrictBaseModel):
             raise ValueError("requested_expiry must be UTC")
         return value
 
+    @field_validator("attestation_identity")
+    @classmethod
+    def attestation_identity_is_not_supported(cls, value: str | None) -> str | None:
+        if value is not None:
+            raise ValueError("attestation_identity override is not supported")
+        return value
+
 
 class AttestationAuthority(Protocol):
     def issue(self, identity: str, gco_data: dict) -> AttestationModel:
@@ -67,9 +74,8 @@ class GCODerivationRuntime:
             lineage=[*parent.lineage, canonical_gco_hash(parent)],
             attestation=None,
         )
-        identity = request.attestation_identity if request.attestation_identity is not None else parent.model_identity
         attestation = self.authority.issue(
-            identity,
+            parent.model_identity,
             child_without_attestation.model_dump(mode="json", exclude={"attestation"}),
         )
         child = child_without_attestation.model_copy(update={"attestation": attestation})

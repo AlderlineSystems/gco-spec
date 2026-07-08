@@ -34,7 +34,8 @@
           "tool_uri": { "type": "string", "format": "uri" },
           "scope": { "type": "string" },
           "max_depth": { "type": "integer", "minimum": 0 }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "state_access_permissions": {
@@ -46,7 +47,8 @@
           "namespace": { "type": "string" },
           "access_mode": { "enum": ["read", "write", "append", "none"] },
           "taint_policy": { "enum": ["clean", "sanitized", "tainted", "isolated"] }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "expires_at": { "type": "string", "format": "date-time" },
@@ -58,7 +60,8 @@
         "format": { "enum": ["jwt-svid", "x509-svid", "raw-jws", "tpm-quote"] },
         "value": { "type": "string" },
         "issuer": { "type": ["string", "null"], "format": "uri" }
-      }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

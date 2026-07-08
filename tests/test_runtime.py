@@ -457,6 +457,25 @@ def test_derive_for_subcall_returns_verified_child_and_denies_expansion():
     assert denied.reason == DerivationError.TOOL_AUTHORITY_EXPANDED.value
 
 
+def test_derive_for_subcall_uses_configured_clock_for_derivation_validation():
+    key = _key()
+    frozen_now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    parent = _sign(
+        _with_identity(make_root_gco()).model_copy(
+            update={"expires_at": datetime(2025, 1, 1, tzinfo=timezone.utc)}
+        ),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), attestation_authority=SigningAuthority(key), now=lambda: frozen_now)
+    request = DelegationRequest(requested_expiry=datetime(2024, 6, 1, tzinfo=timezone.utc))
+
+    decision = runtime.derive_for_subcall(parent, request)
+
+    assert decision.allowed is True
+    assert decision.child is not None
+    assert decision.child.expires_at == request.requested_expiry
+
+
 def test_derive_for_subcall_denies_untrusted_minted_attestation_and_missing_authority():
     trusted = _key()
     untrusted = _key()

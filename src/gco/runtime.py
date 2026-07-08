@@ -170,7 +170,10 @@ class GovernanceRuntime:
             if not parent_verified.verified:
                 return self._deny(parent_verified.error_code, parent_verified.message)
             delegation_request = request if isinstance(request, DelegationRequest) else DelegationRequest.model_validate(request)
-            child = GCODerivationRuntime(self.attestation_authority).derive(parent_gco, delegation_request)
+            child = GCODerivationRuntime(self.attestation_authority, validator=self.validator).derive(
+                parent_gco,
+                delegation_request,
+            )
             verified = self.verifier.verify(child.attestation, child)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)

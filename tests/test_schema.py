@@ -62,3 +62,22 @@ def test_json_schema_rejects_unknown_enums(valid_root_gco, path, value):
 
     with pytest.raises(ValidationError):
         Draft202012Validator(_schema()).validate(data)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("tool_authority", 0),
+        ("state_access_permissions", 0),
+        ("attestation",),
+    ],
+)
+def test_json_schema_rejects_nested_extra_fields(valid_root_gco, path):
+    data = valid_root_gco.model_dump(mode="json")
+    target = data
+    for key in path:
+        target = target[key]
+    target["unexpected"] = "extra"
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(_schema()).validate(data)

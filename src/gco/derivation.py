@@ -45,9 +45,9 @@ class AttestationAuthority(Protocol):
 
 
 class GCODerivationRuntime:
-    def __init__(self, attestation_authority: AttestationAuthority) -> None:
+    def __init__(self, attestation_authority: AttestationAuthority, *, validator: GCOValidator | None = None) -> None:
         self.authority = attestation_authority
-        self.validator = GCOValidator()
+        self.validator = validator or GCOValidator()
 
     def derive(self, parent: GCO, request: DelegationRequest) -> GCO:
         if len(parent.lineage) + 1 > 128:

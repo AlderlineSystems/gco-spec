@@ -10,9 +10,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from conftest import BASE_TIME, make_child_gco, make_root_gco
 from gco.attestation import AttestationError
 from gco.derivation import DelegationRequest
-from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, ToolAuthority
+from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, TaintPolicy, ToolAuthority
 from gco.runtime import Decision, GovernanceRuntime
-from gco.state_store import GovernedStateStore, NamespaceAccessDenied
+from gco.state_store import GovernedStateStore, NamespaceAccessDenied, TaintedStateRead
 from gco.trust import TrustBundle
 from gco.validator import DerivationError, canonical_gco_hash
 
@@ -198,6 +198,40 @@ def test_authorize_tool_call_authentic_valid_and_invalid():
     assert empty_scope.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "authorize_tool_call",
+        "authorize_state_access",
+        "read_state",
+        "write_state",
+    ],
+)
+def test_runtime_authority_denies_expired_gco_even_with_valid_attestation(operation):
+    key = _key()
+    subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)],
+        ).model_copy(update={"expires_at": NOW - timedelta(seconds=1)})
+    )
+    subject = _sign(subject, key)
+    store = GovernedStateStore()
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    if operation == "authorize_tool_call":
+        decision = runtime.authorize_tool_call(subject, "https://tools.example/search")
+    elif operation == "authorize_state_access":
+        decision = runtime.authorize_state_access(subject, "memory", AccessMode.READ)
+    elif operation == "read_state":
+        decision = runtime.read_state(subject, "memory", "answer")
+    else:
+        decision = runtime.write_state(subject, "memory", "answer", b"42")
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.EXPIRED
+    assert store._values == {}
+
+
 def test_authorize_tool_call_enforces_requested_scope_when_provided():
     key = _key()
     parent = _sign(
@@ -353,10 +387,6 @@ def test_authorize_state_access_write_requires_write_grant_not_append():
 def test_authorize_state_access_is_at_least_as_strict_as_store_permission_gate(
     granted_mode: AccessMode, requested_mode: AccessMode
 ):
-    # The runtime gate requires granted_rank >= requested_rank (strict rank comparison).
-    # The store's own write() gate is coarser (WRITE and APPEND grants can both call
-    # write()), so the runtime must never be more permissive than the store, but it can
-    # be stricter (e.g. an APPEND grant no longer satisfies a WRITE request here).
     key = _key()
     namespace = "memory"
     store = GovernedStateStore()
@@ -455,6 +485,25 @@ def test_derive_for_subcall_returns_verified_child_and_denies_expansion():
     assert denied.allowed is False
     assert denied.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
     assert denied.reason == DerivationError.TOOL_AUTHORITY_EXPANDED.value
+
+
+def test_derive_for_subcall_uses_configured_clock_for_derivation_validation():
+    key = _key()
+    frozen_now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    parent = _sign(
+        _with_identity(make_root_gco()).model_copy(
+            update={"expires_at": datetime(2025, 1, 1, tzinfo=timezone.utc)}
+        ),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), attestation_authority=SigningAuthority(key), now=lambda: frozen_now)
+    request = DelegationRequest(requested_expiry=datetime(2024, 6, 1, tzinfo=timezone.utc))
+
+    decision = runtime.derive_for_subcall(parent, request)
+
+    assert decision.allowed is True
+    assert decision.child is not None
+    assert decision.child.expires_at == request.requested_expiry
 
 
 def test_derive_for_subcall_denies_untrusted_minted_attestation_and_missing_authority():
@@ -615,6 +664,74 @@ def test_read_state_and_write_state_round_trip():
     assert read.value == b"42"
 
 
+def test_write_state_append_mode_allows_new_key_and_denies_overwrite():
+    key = _key()
+    store = GovernedStateStore()
+    appender = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.APPEND)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    created = runtime.write_state(appender, "log", "entry", b"first", mode=AccessMode.APPEND)
+    overwritten = runtime.write_state(appender, "log", "entry", b"second", mode=AccessMode.APPEND)
+    write_mode = runtime.write_state(appender, "log", "other", b"second")
+    read = runtime.read_state(appender, "log", "entry")
+
+    assert created == Decision(allowed=True)
+    assert overwritten.allowed is False
+    assert overwritten.error_code is NamespaceAccessDenied
+    assert overwritten.reason == "append denied for existing key log/entry"
+    assert write_mode.allowed is False
+    assert write_mode.error_code is NamespaceAccessDenied
+    assert read.allowed is False
+    assert read.error_code is NamespaceAccessDenied
+    assert read.reason == "read denied for namespace log"
+    assert store._values == {("log", "entry"): b"first"}
+
+
+def test_write_state_append_mode_narrows_write_grant_to_append_semantics():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    created = runtime.write_state(writer, "log", "entry", b"first", mode="append")
+    overwritten = runtime.write_state(writer, "log", "entry", b"second", mode="append")
+    write_mode = runtime.write_state(writer, "log", "entry", b"second")
+
+    assert created == Decision(allowed=True)
+    assert overwritten.allowed is False
+    assert overwritten.error_code is NamespaceAccessDenied
+    assert overwritten.reason == "append denied for existing key log/entry"
+    assert write_mode == Decision(allowed=True)
+    assert store._values == {("log", "entry"): b"second"}
+
+
+def test_write_state_rejects_non_write_modes():
+    key = _key()
+    store = GovernedStateStore()
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    read_mode = runtime.write_state(writer, "memory", "answer", b"42", mode=AccessMode.READ)
+    unknown_mode = runtime.write_state(writer, "memory", "answer", b"42", mode="bogus")
+
+    assert read_mode.allowed is False
+    assert read_mode.error_code is NamespaceAccessDenied
+    assert read_mode.reason == "AccessMode.READ denied for namespace memory"
+    assert unknown_mode.allowed is False
+    assert unknown_mode.error_code is NamespaceAccessDenied
+    assert unknown_mode.reason == "bogus denied for namespace memory"
+    assert store._values == {}
+
+
 def test_write_state_denies_read_only_grant_and_read_state_denies_undelegated():
     key = _key()
     store = GovernedStateStore()
@@ -657,3 +774,122 @@ def test_read_state_missing_key_and_write_state_unauthentic_deny():
     assert unauthentic.allowed is False
     assert unauthentic.error_code is AttestationError.UNTRUSTED_KEY
     assert store._values == {}
+
+
+def test_read_state_unverified_attestation_denies_before_store_access():
+    trusted = _key()
+    forged = _key()
+    store = GovernedStateStore()
+    forged_reader = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)])),
+        forged,
+        kid="forged",
+    )
+
+    decision = GovernanceRuntime(_bundle(trusted), state_store=store, now=lambda: NOW).read_state(
+        forged_reader,
+        "memory",
+        "answer",
+    )
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.UNTRUSTED_KEY
+    assert store._values == {}
+
+
+def test_read_state_tainted_and_unexpected_store_errors_deny():
+    class ExplodingStore(GovernedStateStore):
+        def read(self, namespace: str, key: str, gco: GCO) -> bytes:
+            raise RuntimeError("read boom")
+
+    key = _key()
+    tainted_writer = _sign(
+        _with_identity(
+            make_root_gco(
+                state_access_permissions=[
+                    StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.TAINTED)
+                ]
+            )
+        ),
+        key,
+    )
+    clean_reader = _sign(
+        _with_identity(
+            make_root_gco(
+                state_access_permissions=[
+                    StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.CLEAN)
+                ]
+            )
+        ),
+        key,
+    )
+    store = GovernedStateStore()
+    store.write("memory", "answer", b"42", tainted_writer)
+
+    tainted = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW).read_state(clean_reader, "memory", "answer")
+    exploded = GovernanceRuntime(_bundle(key), state_store=ExplodingStore(), now=lambda: NOW).read_state(
+        clean_reader,
+        "memory",
+        "answer",
+    )
+
+    assert tainted.allowed is False
+    assert tainted.error_code is TaintedStateRead
+    assert exploded.allowed is False
+    assert exploded.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.reason == "read boom"
+
+
+def test_read_state_malformed_input_denies():
+    key = _key()
+
+    decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).read_state({"not": "a gco"}, "memory", "answer")
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.GCO_MALFORMED
+
+
+def test_write_state_store_denials_malformed_input_and_unexpected_error_deny():
+    class DenyingStore(GovernedStateStore):
+        def write(self, namespace: str, key: str, value: bytes, gco: GCO) -> None:
+            raise NamespaceAccessDenied("store denied")
+
+    class ExplodingStore(GovernedStateStore):
+        def write(self, namespace: str, key: str, value: bytes, gco: GCO) -> None:
+            raise RuntimeError("write boom")
+
+    key = _key()
+    reader = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.READ)])),
+        key,
+    )
+    writer = _sign(
+        _with_identity(make_root_gco(state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)])),
+        key,
+    )
+
+    auth_denied = GovernanceRuntime(_bundle(key), now=lambda: NOW).write_state(reader, "memory", "answer", b"42")
+    store_denied = GovernanceRuntime(_bundle(key), state_store=DenyingStore(), now=lambda: NOW).write_state(
+        writer,
+        "memory",
+        "answer",
+        b"42",
+    )
+    malformed = GovernanceRuntime(_bundle(key), now=lambda: NOW).write_state({"not": "a gco"}, "memory", "answer", b"42")
+    exploded = GovernanceRuntime(_bundle(key), state_store=ExplodingStore(), now=lambda: NOW).write_state(
+        writer,
+        "memory",
+        "answer",
+        b"42",
+    )
+
+    assert auth_denied.allowed is False
+    assert auth_denied.error_code is NamespaceAccessDenied
+    assert store_denied.allowed is False
+    assert store_denied.error_code is NamespaceAccessDenied
+    assert store_denied.reason == "store denied"
+    assert malformed.allowed is False
+    assert malformed.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.allowed is False
+    assert exploded.error_code is DerivationError.GCO_MALFORMED
+    assert exploded.reason == "write boom"

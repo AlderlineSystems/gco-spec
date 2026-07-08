@@ -11,7 +11,7 @@ from gco.validator import (
     DerivationError,
     GCODerivationException,
     GCOValidator,
-    _access_rank,
+    _access_allows,
     _scope_is_subset,
     _taint_rank,
     canonical_gco_hash,
@@ -31,6 +31,13 @@ class DelegationRequest(StrictBaseModel):
             raise ValueError("requested_expiry must be UTC")
         return value
 
+    @field_validator("attestation_identity")
+    @classmethod
+    def attestation_identity_is_not_supported(cls, value: str | None) -> str | None:
+        if value is not None:
+            raise ValueError("attestation_identity override is not supported")
+        return value
+
 
 class AttestationAuthority(Protocol):
     def issue(self, identity: str, gco_data: dict) -> AttestationModel:
@@ -38,9 +45,9 @@ class AttestationAuthority(Protocol):
 
 
 class GCODerivationRuntime:
-    def __init__(self, attestation_authority: AttestationAuthority) -> None:
+    def __init__(self, attestation_authority: AttestationAuthority, *, validator: GCOValidator | None = None) -> None:
         self.authority = attestation_authority
-        self.validator = GCOValidator()
+        self.validator = validator or GCOValidator()
 
     def derive(self, parent: GCO, request: DelegationRequest) -> GCO:
         if len(parent.lineage) + 1 > 128:
@@ -67,9 +74,8 @@ class GCODerivationRuntime:
             lineage=[*parent.lineage, canonical_gco_hash(parent)],
             attestation=None,
         )
-        identity = request.attestation_identity if request.attestation_identity is not None else parent.model_identity
         attestation = self.authority.issue(
-            identity,
+            parent.model_identity,
             child_without_attestation.model_dump(mode="json", exclude={"attestation"}),
         )
         child = child_without_attestation.model_copy(update={"attestation": attestation})
@@ -93,9 +99,10 @@ class GCODerivationRuntime:
             parent_tool = parent_tools.get(str(requested_tool.tool_uri))
             if parent_tool is None:
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
-            child_depth = parent_tool.max_depth - 1
-            if child_depth < 0:
+            remaining_depth = parent_tool.max_depth - 1
+            if remaining_depth < 0:
                 raise GCODerivationException(DerivationError.MAX_DEPTH_INCREASED)
+            child_depth = min(requested_tool.max_depth, remaining_depth)
             if not _scope_is_subset(requested_tool.scope, parent_tool.scope):
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
             child_tools.append(
@@ -114,9 +121,7 @@ class GCODerivationRuntime:
             parent_permission = parent_permissions.get(requested_permission.namespace)
             if parent_permission is None:
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
-            requested_access = _access_rank(requested_permission.access_mode)
-            parent_access = _access_rank(parent_permission.access_mode)
-            if requested_access is None or parent_access is None or requested_access > parent_access:
+            if not _access_allows(parent_permission.access_mode, requested_permission.access_mode):
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
             requested_taint = _taint_rank(requested_permission.taint_policy)
             parent_taint = _taint_rank(parent_permission.taint_policy)

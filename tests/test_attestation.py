@@ -82,6 +82,12 @@ def _unsigned_token(header: dict, payload: dict | list) -> str:
     return f"{_b64_json(header)}.{_b64_json(payload)}."
 
 
+def _token_with_corrupted_signature(token: str) -> str:
+    head, payload, signature = token.split(".")
+    replacement = "A" if signature[0] != "A" else "B"
+    return f"{head}.{payload}.{replacement}{signature[1:]}"
+
+
 def test_jwt_svid_happy_path(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()
@@ -154,8 +160,7 @@ def test_jwt_svid_bad_signature_returns_unverified_signature(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()
     attestation = _jwt_attestation(gco, key)
-    head, payload, signature = attestation.value.split(".")
-    corrupted = f"{head}.{payload}.{signature[:-2]}aa"
+    corrupted = _token_with_corrupted_signature(attestation.value)
 
     result = _verify(
         AttestationModel(format=AttestationFormat.JWT_SVID, value=corrupted),
@@ -185,6 +190,21 @@ def test_decode_non_object_payload_is_malformed(monkeypatch):
 
     assert result.verified is False
     assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_decode_generic_exception_is_malformed(monkeypatch):
+    key = _rsa_key()
+
+    def raise_decode_error(*args, **kwargs):
+        raise RuntimeError("decode failed")
+
+    monkeypatch.setattr(attestation_module.jwt, "decode", raise_decode_error)
+
+    result = attestation_module._decode_with_key("token", key.public_key(), {"alg": "RS256"})
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+    assert result.message == "JWS payload is malformed"
 
 
 def test_jwt_svid_decode_failure_after_key_selection_returns_malformed(valid_root_gco):
@@ -218,6 +238,88 @@ def test_jwt_svid_expired(valid_root_gco):
 
     assert result.verified is False
     assert result.error_code is AttestationError.EXPIRED_ATTESTATION
+
+
+def test_jwt_svid_nbf_uses_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["nbf"] = int((VERIFY_TIME - timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_future_nbf_rejected_by_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["nbf"] = int((VERIFY_TIME + timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_jwt_svid_iat_uses_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["iat"] = int((VERIFY_TIME - timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_future_iat_rejected_by_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["iat"] = int((VERIFY_TIME + timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+@pytest.mark.parametrize("claim", ["nbf", "iat"])
+def test_jwt_svid_malformed_time_claim_rejected(claim, valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims[claim] = "not-a-timestamp"
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+@pytest.mark.parametrize("claim", ["exp", "nbf", "iat"])
+def test_jwt_svid_out_of_range_time_claim_rejected(claim, valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims[claim] = 10**100
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_non_finite_numeric_date_is_rejected():
+    assert attestation_module._numeric_date(float("inf")) is None
 
 
 def test_jwt_svid_missing_exp_is_malformed(valid_root_gco):
@@ -542,8 +644,7 @@ def test_x509_svid_bad_signature_returns_unverified_signature(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     _, root, _, intermediate, leaf_key, leaf = _chain()
     attestation = _x509_attestation(gco, leaf_key, leaf, intermediate)
-    head, payload, signature = attestation.value.split(".")
-    corrupted = f"{head}.{payload}.{signature[:-2]}aa"
+    corrupted = _token_with_corrupted_signature(attestation.value)
 
     result = _verify(AttestationModel(format=AttestationFormat.X509_SVID, value=corrupted), gco, _trust_bundle_for_ca(root))
 

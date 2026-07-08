@@ -59,7 +59,7 @@ def _attestation(gco: GCO, *, authentic: bool) -> AttestationModel:
 
 
 def rand_parent(rng: random.Random) -> GCO:
-    return GCO(
+    parent = GCO(
         gco_version="1.0.0",
         trace_id=uuid4(),
         span_id=uuid4(),
@@ -71,8 +71,9 @@ def rand_parent(rng: random.Random) -> GCO:
         state_access_permissions=[StatePermission(namespace="ns", access_mode=rng.choice(ACCESS), taint_policy=rng.choice(TAINT))],
         expires_at=NOW + timedelta(days=1),
         lineage=[],
-        attestation=AttestationModel(format=AttestationFormat.JWT_SVID, value="parent"),
+        attestation=None,
     )
+    return parent.model_copy(update={"attestation": _attestation(parent, authentic=True)})
 
 
 def rand_child(parent: GCO, rng: random.Random, *, authentic: bool, expanding: bool) -> GCO:
@@ -163,7 +164,10 @@ def main() -> None:
     print(f"uncaught exceptions:   {uncaught}")
     for example in examples:
         print("  example:", example)
-    print("RESULT:", "PASS" if unauthentic_allowed == 0 and expansion_allowed == 0 and uncaught == 0 else "**FAIL**")
+    bad = unauthentic_allowed + expansion_allowed + uncaught
+    print("RESULT:", "PASS" if bad == 0 else "**FAIL**")
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

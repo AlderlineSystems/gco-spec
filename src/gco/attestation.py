@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,12 +32,16 @@ class AttestationError(Enum):
 
 @dataclass(frozen=True)
 class VerificationResult:
+    """Cryptographic attestation verification result."""
+
     verified: bool
     error_code: AttestationError | None = None
     message: str | None = None
 
 
 class AttestationVerifier:
+    """Verify GCO-bound JWT-SVID and X.509-SVID attestations."""
+
     def __init__(
         self,
         trust_bundle: TrustBundle,
@@ -65,7 +70,16 @@ class AttestationVerifier:
     def _verify_jwt_svid(self, token: str, gco: GCO, now: datetime) -> VerificationResult:
         try:
             header = jwt.get_unverified_header(token)
-            payload = jwt.decode(token, options={"verify_signature": False})
+            payload = jwt.decode(
+                token,
+                options={
+                    "verify_signature": False,
+                    "verify_aud": False,
+                    "verify_exp": False,
+                    "verify_nbf": False,
+                    "verify_iat": False,
+                },
+            )
         except Exception:  # noqa: BLE001
             return _failure(AttestationError.MALFORMED_ATTESTATION, "JWT-SVID is malformed")
 
@@ -172,7 +186,12 @@ def _decode_with_key(
             token,
             key=key,
             algorithms=list(allowed),
-            options={"verify_aud": False, "verify_exp": False},
+            options={
+                "verify_aud": False,
+                "verify_exp": False,
+                "verify_nbf": False,
+                "verify_iat": False,
+            },
         )
     except jwt.InvalidSignatureError:
         return _failure(AttestationError.UNVERIFIED_SIGNATURE, "JWS signature could not be verified")
@@ -198,9 +217,39 @@ def _verify_bindings(
     exp = payload.get("exp")
     if not isinstance(exp, int | float):
         return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation exp claim is missing")
-    if datetime.fromtimestamp(exp, timezone.utc) <= now:
+    exp_time = _numeric_date(exp)
+    if exp_time is None:
+        return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation exp claim is malformed")
+    if exp_time <= now:
         return _failure(AttestationError.EXPIRED_ATTESTATION, "attestation is expired")
+    nbf = payload.get("nbf")
+    if nbf is not None:
+        if not isinstance(nbf, int | float):
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation nbf claim is malformed")
+        nbf_time = _numeric_date(nbf)
+        if nbf_time is None:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation nbf claim is malformed")
+        if nbf_time > now:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation is not yet valid")
+    iat = payload.get("iat")
+    if iat is not None:
+        if not isinstance(iat, int | float):
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation iat claim is malformed")
+        iat_time = _numeric_date(iat)
+        if iat_time is None:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation iat claim is malformed")
+        if iat_time > now:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation was issued in the future")
     return VerificationResult(verified=True)
+
+
+def _numeric_date(value: int | float) -> datetime | None:
+    if not math.isfinite(value):
+        return None
+    try:
+        return datetime.fromtimestamp(value, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _validated_x509_chain(

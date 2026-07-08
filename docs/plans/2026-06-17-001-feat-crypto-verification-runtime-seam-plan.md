@@ -1,6 +1,6 @@
 ---
 title: "feat: Attestation crypto verification + runtime enforcement seam"
-status: active
+status: implemented
 date: 2026-06-17
 type: feat
 depth: deep
@@ -8,7 +8,7 @@ depth: deep
 
 # feat: Attestation Crypto Verification + Runtime Enforcement Seam
 
-Two sequenced milestones that move GCO from *advisory* (structurally validates authority but trusts attestations on faith) to *enforcing* (authenticates the attestation cryptographically, then exposes a single tighten-or-deny decision point a host can gate on). Crypto is the trust anchor; the runtime seam composes it with the already-verified validator, derivation, and state-store layers.
+Two sequenced milestones that moved GCO from *advisory* (structurally validates authority but trusts attestations on faith) to *enforcing* (authenticates the attestation cryptographically, then exposes a single tighten-or-deny decision point a host can gate on). Crypto is the trust anchor; the runtime seam composes it with the already-verified validator, derivation, and state-store layers.
 
 **Execution posture:** security-critical and greenfield — implement adversarial-test-first. For each verifier and decision path, start from a failing test that a forged/tampered/expanded input is rejected, then make it pass. Delegate execution to Codex per the same pattern used for the state-store fixes.
 
@@ -16,10 +16,10 @@ Two sequenced milestones that move GCO from *advisory* (structurally validates a
 
 ## Summary
 
-`validator.py`, `state_store.py`, and `derivation.py` are independently audited release-ready, but the system still **trusts attestations on presence + format only** — the README says so honestly, and `positioning.md` frames GCO as "a primitive that a runtime enforces." This plan delivers the two missing pieces:
+`validator.py`, `state_store.py`, and `derivation.py` were independently audited release-ready, but the system still **trusted attestations on presence + format only** — the README said so honestly, and `positioning.md` framed GCO as "a primitive that a runtime enforces." This plan delivered the two missing pieces:
 
-1. **Milestone 1 — Attestation crypto verification.** A standalone `AttestationVerifier` that establishes an attestation's *authenticity* (signature, key trust, identity binding, digest binding, expiry) against an offline trust bundle, for `jwt-svid` and `x509-svid`. `raw-jws` and `tpm-quote` fail closed as explicitly unverified.
-2. **Milestone 2 — Runtime enforcement seam.** A transport-agnostic `GovernanceRuntime` that composes verifier + validator + derivation + state store into `Decision`-returning chokepoint methods a host calls when a node spawns a sub-call, invokes a tool, or accesses governed state. Verify authenticity first, then structural tightening, then resource authority — fail closed at each step.
+1. **Milestone 1 — Attestation crypto verification.** A standalone `AttestationVerifier` establishes an attestation's *authenticity* (signature, key trust, identity binding, digest binding, expiry) against an offline trust bundle, for `jwt-svid` and `x509-svid`. `raw-jws` and `tpm-quote` fail closed as explicitly unverified.
+2. **Milestone 2 — Runtime enforcement seam.** A transport-agnostic `GovernanceRuntime` composes verifier + validator + derivation + state store into `Decision`-returning chokepoint methods a host calls when a node spawns a sub-call, invokes a tool, or accesses governed state. It verifies authenticity first, then structural tightening, then resource authority — fail closed at each step.
 
 MCP propagation and a CLI are explicitly out of scope (later adapters on top of this seam).
 
@@ -27,7 +27,7 @@ MCP propagation and a CLI are explicitly out of scope (later adapters on top of 
 
 ## Problem Frame
 
-GCO's whole job is keeping authority from silently widening as computation branches. Today a descendant's *structure* is checked (tightening, lineage, expiry), but its `attestation` is accepted if it merely has a supported `format` and a non-empty `value`. Any actor that can emit a well-shaped GCO is trusted — there is no cryptographic proof the attestation was issued by the claimed workload identity, nor that it binds to *this* GCO's contents. And even with verification, nothing today gives a host a single call to make at the moment authority must be enforced; the layers exist but are not composed into an enforcement point. Until both exist, GCO is advisory.
+GCO's whole job is keeping authority from silently widening as computation branches. Before this plan landed, a descendant's *structure* was checked (tightening, lineage, expiry), but its `attestation` was accepted if it merely had a supported `format` and a non-empty `value`. Any actor that could emit a well-shaped GCO was trusted — there was no cryptographic proof the attestation was issued by the claimed workload identity, nor that it bound to *this* GCO's contents. The implementation now adds that proof for `jwt-svid` and `x509-svid` and exposes a host-facing runtime seam for enforcement.
 
 ---
 
@@ -47,8 +47,8 @@ GCO's whole job is keeping authority from silently widening as computation branc
 
 - **KTD1 — Offline trust bundle, not SPIRE.** Trust is a config-loaded `TrustBundle` (trust domain → trusted JWK set for JWS, and CA certificates for X.509). Rationale: self-contained reference implementation; SPIRE/workload-API is a deployment concern that can back the same interface later. *(confirmed scope fork)*
 - **KTD2 — Verification is a standalone `AttestationVerifier`, composed by the runtime.** `validator.py` stays frozen (it was just certified; its audit explicitly scoped signature verification out). The verifier is called by the runtime seam, not folded into `validate()`. Rationale: preserve the audited contract; keep crypto independently testable in isolation.
-- **KTD3 — Unify verification around JWS; bind to the canonical hash.** `jwt-svid`/`raw-jws` are JWS/JWT compact tokens; `x509-svid` is verified as a JWS whose `x5c` header carries the leaf+intermediates, with the chain path-validated against the bundle CAs and the SPIFFE ID read from the leaf cert's URI SAN. All formats bind the GCO via a `gco_hash` claim equal to `canonical_gco_hash(gco)`. Rationale: one verification path, reuses the existing canonical hash, avoids changing `AttestationModel` fields (KTD justifies R3). *(directional — exact envelope confirmable at execution)*
-- **KTD4 — Use a vetted JOSE library; never hand-roll signature verification.** X.509 path validation uses `cryptography`'s `x509.verification` (confirmed available, v49). JWS/JWT signature verification uses a maintained JOSE lib (e.g. `joserfc` or `PyJWT`) added as a runtime dependency; exact pick is execution-time. Rationale: crypto correctness is the entire point of this milestone.
+- **KTD3 — Unify verified formats around JWS; bind to the canonical hash.** `jwt-svid` is a JWT compact token; `x509-svid` is verified as a JWS whose `x5c` header carries the leaf+intermediates, with the chain path-validated against the bundle CAs and the SPIFFE ID read from the leaf cert's URI SAN. Verified formats bind the GCO via a `gco_hash` claim equal to `canonical_gco_hash(gco)`. `raw-jws` remains declared but unsupported until a dedicated verifier is scoped. Rationale: one verification path for the implemented formats, reuses the existing canonical hash, avoids changing `AttestationModel` fields.
+- **KTD4 — Use vetted libraries; never hand-roll signature verification.** X.509 path validation uses `cryptography`'s `x509.verification`. JWS/JWT signature verification uses `PyJWT` as a runtime dependency. Rationale: crypto correctness is the entire point of this milestone.
 - **KTD5 — Unsupported formats fail closed, loudly.** `tpm-quote` (and `raw-jws` if not in the first cut) return `UNSUPPORTED_FORMAT` with `verified=False`. Rationale: honesty — "we do not verify this" must never read as "verified."
 - **KTD6 — The seam is transport-agnostic and returns `Decision`s; the host enforces.** No MCP/HTTP/transport coupling. Composition order is fixed: authenticity → structural tightening → resource authority, fail closed at each. Rationale: MCP propagation becomes a thin later adapter; matches `positioning.md`'s "depends on deployment controls to be enforcing."
 - **KTD7 — Injected clock, mirroring the validator.** The verifier and seam take a `now` callable (default `datetime.now(timezone.utc)`) so attestation-expiry is deterministically testable, exactly as `GCOValidator` already does.
@@ -143,8 +143,8 @@ The per-unit `**Files:**` sections are authoritative; the tree is the expected s
   - Error: malformed JWK JSON and malformed PEM each raise a controlled `TrustBundleError`, not a bare exception.
 - **Verification:** bundle constructs from fixtures; malformed inputs rejected with a typed error; unknown-domain lookup is a controlled miss.
 
-### U2. JWS-based verifier core (jwt-svid, raw-jws path)
-- **Goal:** `AttestationVerifier.verify(attestation, gco, *, now=...)` that verifies a compact JWS/JWT: signature against a trusted JWK, `gco_hash` claim equals `canonical_gco_hash(gco)`, SPIFFE ID (sub) equals `gco.model_identity`, issuer/audience sane, not expired.
+### U2. JWS-based verifier core (jwt-svid path)
+- **Goal:** `AttestationVerifier.verify(attestation, gco, *, now=...)` that verifies a compact JWT-SVID: signature against a trusted JWK, `gco_hash` claim equals `canonical_gco_hash(gco)`, SPIFFE ID (sub) equals `gco.model_identity`, and the attestation is not expired.
 - **Requirements:** R1, R2, R3, R7, KTD3, KTD4, KTD7.
 - **Dependencies:** U1.
 - **Files:** `src/gco/attestation.py`, `tests/test_attestation.py`.
@@ -271,12 +271,12 @@ The per-unit `**Files:**` sections are authoritative; the tree is the expected s
 
 ---
 
-## Open Questions (resolve at execution)
+## Resolved Questions
 
-- Exact JOSE library (`joserfc` vs `PyJWT` vs `jwcrypto`) — pick one maintained lib; add to `dependencies`. Decision deferred to first implementation contact; does not change the plan shape.
-- Exact `cryptography.x509.verification` API surface for custom SPIFFE-SAN policy (confirmed present in v49; precise `PolicyBuilder` usage settled when U3 is written).
-- Whether `model_identity` is the right field to match the SPIFFE ID against, or whether a dedicated SPIFFE-ID convention is needed — confirm against `positioning.md`'s "attested workload identity"; default: `model_identity`.
-- Whether `AttestationModel` needs an optional issuer/`kid` hint — prefer no model change; confirm during U2.
+- Exact JOSE library: resolved as `PyJWT`, listed in runtime dependencies.
+- Exact `cryptography.x509.verification` API surface: resolved in the verifier implementation.
+- SPIFFE identity binding field: resolved as `model_identity`.
+- Attestation issuer hint: `AttestationModel.issuer` remains optional; no `kid` model field was added.
 
 ---
 

@@ -21,6 +21,8 @@ class TrustBundleError(Exception):
 
 @dataclass(frozen=True)
 class TrustDomainBundle:
+    """Trusted JWS keys and X.509 CA anchors for one SPIFFE trust domain."""
+
     jwks: Mapping[str, TrustedPublicKey]
     ca_certs: tuple[x509.Certificate, ...]
     ca_store: Store | None
@@ -31,6 +33,8 @@ class TrustDomainBundle:
 
 @dataclass(frozen=True)
 class TrustBundle:
+    """Offline trust configuration keyed by SPIFFE trust domain."""
+
     domains: Mapping[str, TrustDomainBundle]
 
     @classmethod

@@ -133,7 +133,10 @@ def main() -> None:
     print(f"uncaught exceptions:   {uncaught}")
     for example in examples:
         print("  example:", example)
-    print("RESULT:", "PASS" if verified_forgeries == 0 and uncaught == 0 else "**FAIL**")
+    bad = verified_forgeries + uncaught
+    print("RESULT:", "PASS" if bad == 0 else "**FAIL**")
+    if bad:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

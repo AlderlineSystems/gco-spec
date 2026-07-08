@@ -54,6 +54,13 @@ ACCESS_RANK = {
     AccessMode.WRITE: 3,
 }
 
+ACCESS_ALLOWANCES = {
+    AccessMode.NONE: frozenset({AccessMode.NONE}),
+    AccessMode.READ: frozenset({AccessMode.NONE, AccessMode.READ}),
+    AccessMode.APPEND: frozenset({AccessMode.NONE, AccessMode.APPEND}),
+    AccessMode.WRITE: frozenset({AccessMode.NONE, AccessMode.READ, AccessMode.APPEND, AccessMode.WRITE}),
+}
+
 TAINT_RANK = {
     TaintPolicy.CLEAN: 0,
     TaintPolicy.SANITIZED: 1,
@@ -82,6 +89,10 @@ def _scope_is_subset(child_scope: str, parent_scope: str) -> bool:
 
 def _access_rank(access_mode: Any) -> int | None:
     return ACCESS_RANK.get(access_mode)
+
+
+def _access_allows(granted_mode: Any, requested_mode: Any) -> bool:
+    return requested_mode in ACCESS_ALLOWANCES.get(granted_mode, frozenset())
 
 
 def _taint_rank(taint_policy: Any) -> int | None:
@@ -186,7 +197,7 @@ class GCOValidator:
             parent_tool = parent_tools.get(str(child_tool.tool_uri))
             if parent_tool is None:
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
-            if parent_tool.max_depth == 0 or child_tool.max_depth != parent_tool.max_depth - 1:
+            if parent_tool.max_depth == 0 or child_tool.max_depth > parent_tool.max_depth - 1:
                 raise GCODerivationException(DerivationError.MAX_DEPTH_INCREASED)
             if not _scope_is_subset(child_tool.scope, parent_tool.scope):
                 raise GCODerivationException(DerivationError.TOOL_AUTHORITY_EXPANDED)
@@ -197,9 +208,7 @@ class GCOValidator:
             parent_permission = parent_permissions.get(child_permission.namespace)
             if parent_permission is None:
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
-            child_access = _access_rank(child_permission.access_mode)
-            parent_access = _access_rank(parent_permission.access_mode)
-            if child_access is None or parent_access is None or child_access > parent_access:
+            if not _access_allows(parent_permission.access_mode, child_permission.access_mode):
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
             child_taint = _taint_rank(child_permission.taint_policy)
             parent_taint = _taint_rank(parent_permission.taint_policy)

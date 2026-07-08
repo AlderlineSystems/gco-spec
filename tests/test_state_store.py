@@ -43,6 +43,10 @@ def test_append_allows_new_key_and_rejects_existing_key():
     store.write("log", "entry", b"first", gco)
     with pytest.raises(NamespaceAccessDenied, match="append denied for existing key log/entry"):
         store.write("log", "entry", b"second", gco)
+    with pytest.raises(NamespaceAccessDenied, match="read denied for namespace log"):
+        store.read("log", "entry", gco)
+    with pytest.raises(NamespaceAccessDenied, match="read denied for namespace log"):
+        store.get_taint("log", "entry", gco)
 
 
 def test_read_rejects_none_access():
@@ -113,6 +117,16 @@ def test_get_taint_rejects_none_access():
 
     with pytest.raises(NamespaceAccessDenied):
         store.get_taint("memory", "answer", blocked)
+
+
+@pytest.mark.parametrize("access_mode", [AccessMode.READ, AccessMode.WRITE])
+def test_get_taint_allows_readable_access_modes(access_mode: AccessMode):
+    store = GovernedStateStore()
+    writer = _gco_with_permissions(StatePermission(namespace="memory", access_mode=AccessMode.WRITE))
+    reader = _gco_with_permissions(StatePermission(namespace="memory", access_mode=access_mode))
+    store.write("memory", "answer", b"42", writer)
+
+    assert store.get_taint("memory", "answer", reader) is TaintPolicy.CLEAN
 
 
 def test_taint_laundering_overwrite_keeps_higher_stored_taint():

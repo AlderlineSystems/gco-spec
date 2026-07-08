@@ -12,11 +12,13 @@ from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivatio
 from gco.models import AccessMode, GCO
 from gco.state_store import GovernedStateStore, NamespaceAccessDenied, StateKeyNotFound, TaintedStateRead
 from gco.trust import TrustBundle
-from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_rank, _scope_is_subset
+from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_allows, _access_rank, _scope_is_subset
 
 
 @dataclass(frozen=True)
 class Decision:
+    """Fail-closed authorization result returned by GovernanceRuntime methods."""
+
     allowed: bool
     reason: str | None = None
     error_code: Any = None
@@ -25,6 +27,8 @@ class Decision:
 
 
 class GovernanceRuntime:
+    """Transport-agnostic enforcement seam for verified GCO authority."""
+
     def __init__(
         self,
         trust_bundle: TrustBundle,
@@ -75,6 +79,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             for authority in subject.tool_authority:
                 if str(authority.tool_uri) == str(tool_uri) and authority.max_depth > 0:
                     if not authority.scope.strip():
@@ -99,6 +106,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             try:
                 requested_mode: Any = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
             except (TypeError, ValueError):
@@ -115,7 +125,7 @@ class GovernanceRuntime:
             if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
             # This seam checks only the ACL grant; taint and per-key state are enforced by the store at real access time.
-            if granted_rank < requested_rank:
+            if not _access_allows(permission.access_mode, requested_mode):
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
@@ -129,6 +139,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             access = self.authorize_state_access(subject, namespace, AccessMode.READ)
             if not access.allowed:
                 return access
@@ -143,16 +156,30 @@ class GovernanceRuntime:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         return Decision(allowed=True, value=value)
 
-    def write_state(self, gco: Any, namespace: str, key: str, value: bytes) -> Decision:
+    def write_state(
+        self,
+        gco: Any,
+        namespace: str,
+        key: str,
+        value: bytes,
+        mode: str | AccessMode = AccessMode.WRITE,
+    ) -> Decision:
         try:
             subject = self._coerce_gco(gco)
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
-            access = self.authorize_state_access(subject, namespace, AccessMode.WRITE)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
+            requested_mode = self._coerce_write_mode(mode)
+            if requested_mode is None:
+                return self._deny(NamespaceAccessDenied, f"{mode} denied for namespace {namespace}")
+            access = self.authorize_state_access(subject, namespace, requested_mode)
             if not access.allowed:
                 return access
-            self.state_store.write(namespace, key, value, subject)
+            write_subject = self._subject_for_write_mode(subject, namespace, requested_mode)
+            self.state_store.write(namespace, key, value, write_subject)
         except NamespaceAccessDenied as exc:
             return self._deny(NamespaceAccessDenied, str(exc))
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
@@ -170,7 +197,10 @@ class GovernanceRuntime:
             if not parent_verified.verified:
                 return self._deny(parent_verified.error_code, parent_verified.message)
             delegation_request = request if isinstance(request, DelegationRequest) else DelegationRequest.model_validate(request)
-            child = GCODerivationRuntime(self.attestation_authority).derive(parent_gco, delegation_request)
+            child = GCODerivationRuntime(self.attestation_authority, validator=self.validator).derive(
+                parent_gco,
+                delegation_request,
+            )
             verified = self.verifier.verify(child.attestation, child)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
@@ -187,6 +217,31 @@ class GovernanceRuntime:
         if isinstance(gco, GCO):
             return gco
         return GCO.model_validate(gco)
+
+    def _verify_subject_not_expired(self, subject: GCO) -> Decision | None:
+        if subject.expires_at <= self._now():
+            return self._deny(DerivationError.EXPIRED)
+        return None
+
+    def _coerce_write_mode(self, mode: str | AccessMode) -> AccessMode | None:
+        try:
+            requested_mode = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
+        except (TypeError, ValueError):
+            return None
+        if requested_mode not in {AccessMode.WRITE, AccessMode.APPEND}:
+            return None
+        return requested_mode
+
+    def _subject_for_write_mode(self, subject: GCO, namespace: str, mode: AccessMode) -> GCO:
+        if mode is AccessMode.WRITE:
+            return subject
+        permissions = [
+            permission.model_copy(update={"access_mode": AccessMode.APPEND})
+            if permission.namespace == namespace
+            else permission
+            for permission in subject.state_access_permissions
+        ]
+        return subject.model_copy(update={"state_access_permissions": permissions})
 
     def _deny(self, error_code: Any, reason: str | None = None) -> Decision:
         if reason is None and hasattr(error_code, "value"):

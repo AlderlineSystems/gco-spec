@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13 · **Mode:** audit findings below are historical; `state_store.py` blockers are now resolved (see resolution note) · **Method:** same as the validator audit (per-path reachability, independent attacks, ≥20k fuzz, round-trip property).
 
-> **Resolution note (state_store.py):** the three release-blocking findings — uncaught `KeyError` on missing-key `read`/`get_taint`, taint laundering via overwrite, and unknown-`taint_policy` failing open at the read gate — were fixed and independently re-verified. The fix: missing keys now raise a controlled `StateKeyNotFound(NamespaceAccessDenied)` instead of `KeyError`; write taint is monotonic high-water-mark (`stored = max(existing, writer)` by rank, reusing `validator._taint_rank` — no lattice duplication) so a once-tainted key stays quarantined through clean overwrites; and the read gate is rank-based, failing closed on unrankable values. Reader-vs-data taint alignment beyond quarantine was deliberately **not** added — it is documented in code + README as owned by grant-time validation today (future work), and surfaces as an `INFO` row in `audit_state_attacks.py`, not a hole. Current status: `81 passed` with 100% branch coverage; `audit_state_attacks.py` reports 0 holes (8 PASS, 1 INFO); `audit_state_fuzz.py` reports 20,000 iterations with 0 access / 0 taint / 0 laundering / 0 uncaught; derivation round-trip and the validator harnesses remain green. **state_store.py verdict flips from NOT release-ready → release-ready.** The `derivation.py` low-severity flags (immutable-set duplication, attestation-minted-before-validate) remain open.
+> **Resolution note (state_store.py):** the three release-blocking findings — uncaught `KeyError` on missing-key `read`/`get_taint`, taint laundering via overwrite, and unknown-`taint_policy` failing open at the read gate — were fixed and independently re-verified. The fix: missing keys now raise a controlled `StateKeyNotFound(NamespaceAccessDenied)` instead of `KeyError`; write taint is monotonic high-water-mark (`stored = max(existing, writer)` by rank, reusing `validator._taint_rank` — no lattice duplication) so a once-tainted key stays quarantined through clean overwrites; and the read gate is rank-based, failing closed on unrankable values. A later fix also added per-read reader-vs-data taint alignment: a reader can only receive data whose stored taint rank is no higher than its own grant. Current status: the full pytest suite remains at 100% branch coverage; `audit_state_attacks.py` reports 0 holes, and `audit_state_fuzz.py` reports 20,000 iterations with 0 access / 0 taint / 0 laundering / 0 uncaught. **state_store.py verdict flips from NOT release-ready → release-ready.** The `derivation.py` low-severity flags (immutable-set duplication, attestation-minted-before-validate) remain open.
 
 **Reproduced build claim:** `73 passed`, **100% branch coverage**, nothing in `term-missing`. Confirmed. As with the validator, 100% branch coverage proves every *existing* branch ran; it does not prove the assertions encode the contract, and it cannot flag a missing check (e.g. a `KeyError` path that is a bare dict access, not a branch).
 
@@ -20,10 +20,10 @@ Independent harnesses (repo root, **not** collected by pytest — `testpaths=["t
 | namespace not delegated | `_permission_for` raise, [state_store.py:45](src/gco/state_store.py:45) | `test_write_rejects_missing_namespace` | type only (`NamespaceAccessDenied`) |
 | write denied (access ∉ {write,append}) | [:21-22](src/gco/state_store.py:21) | `test_write_rejects_none_access` | type only |
 | append denied (key exists) | [:24-25](src/gco/state_store.py:24) | `test_append_allows_new_key_and_rejects_existing_key` | type only |
-| read denied (access ∉ {read,write,append}) | [:31-32](src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
+| read denied (access ∉ {read,write}) | [:31-32](src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
 | tainted read (taint ∈ {tainted,isolated}) | [:34-35](src/gco/state_store.py:34) | `test_read_rejects_tainted_state` | type (`TaintedStateRead`) — distinct from ACL ✓ |
 
-**Flags:**
+**Historical flags:**
 - **Taint-vs-ACL is distinguishable** (two exception classes) — good. **But the three ACL sub-reasons all collapse to `NamespaceAccessDenied`** with only the message differing, and **no test asserts the message**. A write rejected for the *wrong* ACL reason (e.g. "not delegated" when the test intends "append denied") passes. The task's exact concern.
 - **`ISOLATED` read rejection is not independently asserted** — only `TAINTED` is tested; `ISOLATED` rides the same set-membership branch. (My attack confirms it does reject — see below — but no repo test pins it.)
 - **No test exists** for: reading a delegated-but-unwritten key, `get_taint` on a missing key, taint downgrade via overwrite, or unknown-enum taint at the read gate. These are the uncovered-by-assertion holes that 100% branch coverage hides.
@@ -31,7 +31,7 @@ Independent harnesses (repo root, **not** collected by pytest — `testpaths=["t
 ### (b) Taint-propagation probe
 
 - Sub-call writes `TAINTED` → any later read is **blocked with `TaintedStateRead`** (taint reason specifically). ✓ — the documented quarantine works for *currently*-tainted data.
-- **But the store consults only the stored (writer) taint, never the reader's.** `SANITIZED` data is served to a `CLEAN`-expecting reader with no alignment check. The README documents no sanitization/alignment step, so this is a **spec gap** as much as a code gap — flag for clarification.
+- **Historical:** the original audited store consulted only the stored (writer) taint, never the reader's. Current code also checks reader-vs-data alignment, so `SANITIZED` data is denied to a `CLEAN`-only reader.
 
 ### (c) Independent attacks — `audit_state_attacks.py` (own fixtures)
 
@@ -44,7 +44,7 @@ Independent harnesses (repo root, **not** collected by pytest — `testpaths=["t
 | unknown `access_mode` on write | PASS | denied (membership test fails closed) |
 | read undelegated namespace | PASS | denied |
 | namespace case-variance (`Memory` vs `memory`) | **HOLE** | namespaces are case-sensitive (correct), but the read leaks `UNCAUGHT KeyError` instead of a clean denial — same root cause as missing-key |
-| sanitized data → clean reader | info | served; reader taint never consulted (no alignment) |
+| sanitized data → clean reader | resolved | now rejected by reader-vs-data taint alignment |
 | `ISOLATED` read | PASS | blocked |
 
 ### (d) Fuzz — `audit_state_fuzz.py`, **20,000 iterations**, independent oracle
@@ -63,7 +63,7 @@ Specific gaps, in severity order:
 1. **Uncaught `KeyError`** on `read`/`get_taint` of any delegated-but-unwritten key. Violates "never raise an uncaught exception." Expected: controlled rejection; Actual: `KeyError` leaks.
 2. **Taint laundering**: a lower-taint write silently downgrades a key's taint label; quarantined data becomes readable. The "taint only rises" invariant is enforced in the validator/derivation but **not** at the store's write path.
 3. **Unknown `taint_policy` fails OPEN** at the read gate (served), versus fail-closed elsewhere.
-4. **No reader/data taint alignment** + **undocumented contract** (`SANITIZED`→`CLEAN` reader passes).
+4. **No reader/data taint alignment** + **undocumented contract** (`SANITIZED`→`CLEAN` reader passes). **Resolved by later reader-vs-data alignment.**
 5. **Test-quality:** ACL sub-reasons share one exception with no message assertion; `ISOLATED` not independently pinned.
 
 ---
@@ -108,7 +108,7 @@ Probed directly across 20k random parents (varying lineage depth 0–3): could n
 
 ### derivation.py verdict — **release-ready for the round-trip security property**, with two low-severity flags:
 - **(LOW, drift)** immutable-field set duplicated between validator equality checks and `derive()` constructor — should share one source of truth.
-- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. Related: the runtime hardcodes `GCOValidator()` with the default wall clock and offers no clock injection, so derivation-expiry behavior is only testable via the 2099 fixture horizon.
+- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. The runtime now passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
 
 ---
 
@@ -127,10 +127,10 @@ src/gco/validator.py       149      0     48      0   100%
 TOTAL                      394      0    108      0   100%
 73 passed
 ```
-No branch is missing. The state-store holes (KeyError, laundering, fail-open taint, alignment) all sit *under* 100% branch coverage: the KeyError is a bare dict access (no branch), and laundering/alignment are behaviors no test asserts.
+No branch is missing. The historical state-store holes (KeyError, laundering, fail-open taint, alignment) all sat *under* 100% branch coverage: the KeyError was a bare dict access (no branch), and laundering/alignment were behaviors no test asserted.
 
 ## Per-file verdict
-- **`state_store.py`: RESOLVED → release-ready** (was NOT release-ready at audit time). The audit found uncaught `KeyError` (14/20k), taint laundering (4085/20k), unknown-taint fail-open, no reader alignment, plus test-quality gaps — fuzz then **FAILED** with 4099 violations. After the fix (see resolution note at top): `81 passed`, 100% branch; `audit_state_attacks.py` 0 holes (8 PASS, 1 INFO); `audit_state_fuzz.py` 20,000 iters with **0** violations across all four categories. Reader-vs-data alignment beyond quarantine remains a documented, deliberately-deferred limitation (owned by grant-time validation), not a hole.
-- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). Two low-severity flags remain open: implicit immutable-set duplication and attestation-minted-before-validate.
+- **`state_store.py`: RESOLVED → release-ready** (was NOT release-ready at audit time). The audit found uncaught `KeyError` (14/20k), taint laundering (4085/20k), unknown-taint fail-open, no reader alignment, plus test-quality gaps — fuzz then **FAILED** with 4099 violations. After the fixes (see resolution note at top), the state store denies missing keys cleanly, preserves taint monotonically, fails closed on unrankable taint, and enforces reader-vs-data taint alignment.
+- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). Two low-severity flags remain open: implicit immutable-set duplication and attestation-minted-before-validate; the earlier runtime clock-injection concern is resolved.
 
 The state-store fix has landed; the two `derivation.py` low-severity flags are still open.

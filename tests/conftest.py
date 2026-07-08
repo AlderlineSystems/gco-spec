@@ -40,7 +40,7 @@ def make_root_gco(
         span_id=UUID("22222222-2222-4222-8222-222222222222"),
         parent_span_id=None,
         policy_id="policy-alpha",
-        model_identity="model-alpha",
+        model_identity="spiffe://example.org/model/model-alpha",
         intervention_version="intervention-v1",
         tool_authority=tool_authority
         if tool_authority is not None

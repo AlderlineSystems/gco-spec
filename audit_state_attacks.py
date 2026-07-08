@@ -29,7 +29,7 @@ def gco_with(*perms: StatePermission) -> GCO:
         span_id=uuid4(),
         parent_span_id=None,
         policy_id="p",
-        model_identity="m",
+        model_identity="spiffe://example.org/ns/default/sa/model-state-attacks",
         intervention_version="iv",
         tool_authority=[],
         state_access_permissions=list(perms),
@@ -204,3 +204,5 @@ for name, verdict, detail in results:
 print("-" * 110)
 print(f"{holes} hole(s) found out of {len(results)} attacks "
       f"('None'/informational rows describe contract gaps, not crashes)")
+if holes:
+    raise SystemExit(1)

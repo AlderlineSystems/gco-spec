@@ -17,6 +17,8 @@ from gco.validator import DerivationError, GCODerivationException, GCOValidator,
 
 @dataclass(frozen=True)
 class Decision:
+    """Fail-closed authorization result returned by GovernanceRuntime methods."""
+
     allowed: bool
     reason: str | None = None
     error_code: Any = None
@@ -25,6 +27,8 @@ class Decision:
 
 
 class GovernanceRuntime:
+    """Transport-agnostic enforcement seam for verified GCO authority."""
+
     def __init__(
         self,
         trust_bundle: TrustBundle,

@@ -31,12 +31,16 @@ class AttestationError(Enum):
 
 @dataclass(frozen=True)
 class VerificationResult:
+    """Cryptographic attestation verification result."""
+
     verified: bool
     error_code: AttestationError | None = None
     message: str | None = None
 
 
 class AttestationVerifier:
+    """Verify GCO-bound JWT-SVID and X.509-SVID attestations."""
+
     def __init__(
         self,
         trust_bundle: TrustBundle,

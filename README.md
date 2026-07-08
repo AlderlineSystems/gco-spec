@@ -18,7 +18,10 @@ or resolved separately when the namespace is made externally fetchable.
 2. `src/gco/validator.py` validates child GCOs against parent GCOs. The existing `validate()` API returns `True` or raises `GCODerivationException`; `validate_result()` returns a `ValidationResult(valid=False, error_code=...)` for callers that prefer non-throwing fail-closed handling, including malformed raw payloads via `GCO_MALFORMED`.
 3. `src/gco/derivation.py` mints tightened child GCOs from delegation requests.
 4. `src/gco/state_store.py` enforces namespace ACLs and taint labels.
-5. `src/gco/der_harness.py` scores pre-recorded recursive transcripts.
+5. `src/gco/trust.py` loads offline trust bundles for SPIFFE trust domains.
+6. `src/gco/attestation.py` verifies supported attestations against those bundles.
+7. `src/gco/runtime.py` composes verification, validation, derivation, and state access behind `Decision`-returning authorization methods.
+8. `src/gco/der_harness.py` scores pre-recorded recursive transcripts.
 
 ## Development
 
@@ -54,6 +57,12 @@ The supported attestation formats are `jwt-svid`, `x509-svid`, `raw-jws`, and `t
 `jwt-svid` and `x509-svid` attestations are cryptographically verified by `src/gco/attestation.py` against an offline `TrustBundle`: signature or chain trust, SPIFFE identity binding, canonical GCO digest binding, and expiry are checked before the runtime seam allows authority to be used.
 
 `raw-jws` and `tpm-quote` are declared formats but are not cryptographically verified by this reference implementation. They fail closed as unsupported at the verifier/runtime seam until a dedicated verifier exists.
+
+Trust bundles may be loaded from a mapping or JSON file shaped as either
+`{"trust_domains": {"example.org": {...}}}` or directly as
+`{"example.org": {...}}`. Each trust-domain entry may include a `jwks` (or
+`jwk_set`) object for `jwt-svid` verification and `ca_certs` (or
+`ca_certificates`) as PEM certificates for `x509-svid` chain validation.
 
 ## Security enforcement
 

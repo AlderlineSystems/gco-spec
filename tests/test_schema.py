@@ -46,6 +46,12 @@ def test_json_schema_and_model_allow_default_taint_policy(valid_root_gco):
     assert GCO.model_validate(data).state_access_permissions[0].taint_policy is TaintPolicy.CLEAN
 
 
+def test_model_allows_attestation_without_issuer():
+    attestation = AttestationModel(format=AttestationFormat.JWT_SVID, value="token", issuer=None)
+
+    assert attestation.issuer is None
+
+
 @pytest.mark.parametrize(
     ("tool_uri", "issuer"),
     [

@@ -198,6 +198,40 @@ def test_authorize_tool_call_authentic_valid_and_invalid():
     assert empty_scope.error_code is DerivationError.TOOL_AUTHORITY_EXPANDED
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "authorize_tool_call",
+        "authorize_state_access",
+        "read_state",
+        "write_state",
+    ],
+)
+def test_runtime_authority_denies_expired_gco_even_with_valid_attestation(operation):
+    key = _key()
+    subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[StatePermission(namespace="memory", access_mode=AccessMode.WRITE)],
+        ).model_copy(update={"expires_at": NOW - timedelta(seconds=1)})
+    )
+    subject = _sign(subject, key)
+    store = GovernedStateStore()
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW)
+
+    if operation == "authorize_tool_call":
+        decision = runtime.authorize_tool_call(subject, "https://tools.example/search")
+    elif operation == "authorize_state_access":
+        decision = runtime.authorize_state_access(subject, "memory", AccessMode.READ)
+    elif operation == "read_state":
+        decision = runtime.read_state(subject, "memory", "answer")
+    else:
+        decision = runtime.write_state(subject, "memory", "answer", b"42")
+
+    assert decision.allowed is False
+    assert decision.error_code is DerivationError.EXPIRED
+    assert store._values == {}
+
+
 def test_authorize_tool_call_enforces_requested_scope_when_provided():
     key = _key()
     parent = _sign(

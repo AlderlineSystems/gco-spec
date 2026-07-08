@@ -75,6 +75,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             for authority in subject.tool_authority:
                 if str(authority.tool_uri) == str(tool_uri) and authority.max_depth > 0:
                     if not authority.scope.strip():
@@ -99,6 +102,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             try:
                 requested_mode: Any = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
             except (TypeError, ValueError):
@@ -129,6 +135,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             access = self.authorize_state_access(subject, namespace, AccessMode.READ)
             if not access.allowed:
                 return access
@@ -149,6 +158,9 @@ class GovernanceRuntime:
             verified = self.verifier.verify(subject.attestation, subject)
             if not verified.verified:
                 return self._deny(verified.error_code, verified.message)
+            expiry = self._verify_subject_not_expired(subject)
+            if expiry is not None:
+                return expiry
             access = self.authorize_state_access(subject, namespace, AccessMode.WRITE)
             if not access.allowed:
                 return access
@@ -190,6 +202,11 @@ class GovernanceRuntime:
         if isinstance(gco, GCO):
             return gco
         return GCO.model_validate(gco)
+
+    def _verify_subject_not_expired(self, subject: GCO) -> Decision | None:
+        if subject.expires_at <= self._now():
+            return self._deny(DerivationError.EXPIRED)
+        return None
 
     def _deny(self, error_code: Any, reason: str | None = None) -> Decision:
         if reason is None and hasattr(error_code, "value"):

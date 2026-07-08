@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyUrl, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 
 class AttestationFormat(str, Enum):
@@ -36,11 +36,11 @@ class StrictBaseModel(BaseModel):
 class AttestationModel(StrictBaseModel):
     format: AttestationFormat
     value: str
-    issuer: Optional[AnyHttpUrl] = None
+    issuer: Optional[AnyUrl] = None
 
 
 class ToolAuthority(StrictBaseModel):
-    tool_uri: AnyHttpUrl
+    tool_uri: AnyUrl
     scope: str
     max_depth: int = Field(ge=0)
 

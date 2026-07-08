@@ -46,6 +46,25 @@ def test_json_schema_and_model_allow_default_taint_policy(valid_root_gco):
 
 
 @pytest.mark.parametrize(
+    ("tool_uri", "issuer"),
+    [
+        ("urn:tool:search", "spiffe://example.org/issuer/gco"),
+        ("spiffe://example.org/tool/search", "urn:issuer:gco"),
+    ],
+)
+def test_json_schema_uri_fields_match_model_uri_contract(valid_root_gco, tool_uri, issuer):
+    data = valid_root_gco.model_dump(mode="json")
+    data["tool_authority"][0]["tool_uri"] = tool_uri
+    data["attestation"]["issuer"] = issuer
+
+    Draft202012Validator(_schema()).validate(data)
+    parsed = GCO.model_validate(data)
+
+    assert str(parsed.tool_authority[0].tool_uri) == tool_uri
+    assert str(parsed.attestation.issuer) == issuer
+
+
+@pytest.mark.parametrize(
     ("path", "value"),
     [
         (("attestation", "format"), "unknown"),

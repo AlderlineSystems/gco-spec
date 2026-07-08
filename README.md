@@ -2,6 +2,16 @@
 
 Reference Python implementation for the Alderline Systems SSL-TS-2026-001 GCO derivation contract.
 
+`SSL-TS-2026-001` is referenced as the governing technical specification for
+this reference implementation. No public normative spec URL is included in this
+repository yet; until one is published, treat this package and the bundled
+schema as the implementation-facing reference material.
+
+The schema identifier
+`https://sovereignsafetylabs.org/schemas/gco_schema_v1.json` is a stable JSON
+Schema namespace and intentionally remains unchanged. The URL should be hosted
+or resolved separately when the namespace is made externally fetchable.
+
 ## Components
 
 1. `src/gco/models.py` defines the strict Pydantic data model.
@@ -14,10 +24,22 @@ Reference Python implementation for the Alderline Systems SSL-TS-2026-001 GCO de
 
 ```bash
 python -m pip install -e ".[test]"
-pytest --cov=src/gco --cov-branch --cov-report=term-missing
+pytest --cov=src/gco --cov-branch --cov-report=term-missing -q
 ```
 
 The intended build order is validator, derivation runtime, state store, then DER harness. Each phase is covered by focused tests in `tests/`.
+
+## Project status
+
+This repository is prepared for public open-source review, but some release
+operations remain maintainer-owned: publishing the schema namespace URL,
+publishing or linking the normative `SSL-TS-2026-001` document, and changing
+repository visibility.
+
+Historical audit reports in `AUDIT_FINDINGS.md` and
+`AUDIT_FINDINGS_LAYERS.md` document previously found issues and include
+resolution notes at the top. The current validation posture is represented by
+the pytest coverage gate and the root-level `audit_*.py` harnesses.
 
 ## Taint Handling
 

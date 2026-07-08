@@ -187,6 +187,21 @@ def test_decode_non_object_payload_is_malformed(monkeypatch):
     assert result.error_code is AttestationError.MALFORMED_ATTESTATION
 
 
+def test_decode_generic_exception_is_malformed(monkeypatch):
+    key = _rsa_key()
+
+    def raise_decode_error(*args, **kwargs):
+        raise RuntimeError("decode failed")
+
+    monkeypatch.setattr(attestation_module.jwt, "decode", raise_decode_error)
+
+    result = attestation_module._decode_with_key("token", key.public_key(), {"alg": "RS256"})
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+    assert result.message == "JWS payload is malformed"
+
+
 def test_jwt_svid_decode_failure_after_key_selection_returns_malformed(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()

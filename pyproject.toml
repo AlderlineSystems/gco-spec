@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,11 +8,38 @@ version = "0.1.0"
 description = "Reference implementation for Alderline Systems GCO derivation contracts."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Alderline Systems" },
+]
+maintainers = [
+    { name = "Sovereign Safety Labs", email = "ops@alderlinesystems.com" },
+]
+keywords = ["gco", "governance", "attestation", "spiffe", "delegation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
 dependencies = [
     "cryptography>=42",
     "PyJWT>=2.8",
     "pydantic>=2.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SSBrouhard/gco-spec"
+Repository = "https://github.com/SSBrouhard/gco-spec"
+Issues = "https://github.com/SSBrouhard/gco-spec/issues"
+Documentation = "https://github.com/SSBrouhard/gco-spec#readme"
 
 [project.optional-dependencies]
 test = [
@@ -23,6 +50,9 @@ test = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"schemas" = ["schemas/gco_schema_v1.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

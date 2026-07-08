@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+          python -m pip install build
+
+      - name: Run tests with coverage
+        run: pytest --cov=src/gco --cov-branch --cov-report=term-missing -q
+
+      - name: Run audit harnesses
+        run: |
+          for audit in audit_*.py; do
+            python "$audit"
+          done
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Verify schema is packaged
+        run: python - <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          wheels = sorted(Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {len(wheels)}")
+          with zipfile.ZipFile(wheels[0]) as wheel:
+              names = set(wheel.namelist())
+          if not any(name.endswith("schemas/gco_schema_v1.json") for name in names):
+              raise SystemExit("schemas/gco_schema_v1.json missing from wheel")
+          print(f"verified schema in {wheels[0]}")
+          sys.exit(0)
+          PY

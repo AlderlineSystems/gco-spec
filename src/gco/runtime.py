@@ -12,7 +12,7 @@ from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivatio
 from gco.models import AccessMode, GCO
 from gco.state_store import GovernedStateStore, NamespaceAccessDenied, StateKeyNotFound, TaintedStateRead
 from gco.trust import TrustBundle
-from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_rank, _scope_is_subset
+from gco.validator import DerivationError, GCODerivationException, GCOValidator, _access_allows, _access_rank, _scope_is_subset
 
 
 @dataclass(frozen=True)
@@ -125,7 +125,7 @@ class GovernanceRuntime:
             if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
             # This seam checks only the ACL grant; taint and per-key state are enforced by the store at real access time.
-            if granted_rank < requested_rank:
+            if not _access_allows(permission.access_mode, requested_mode):
                 return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))

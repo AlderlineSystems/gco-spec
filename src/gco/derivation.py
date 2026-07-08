@@ -11,7 +11,7 @@ from gco.validator import (
     DerivationError,
     GCODerivationException,
     GCOValidator,
-    _access_rank,
+    _access_allows,
     _scope_is_subset,
     _taint_rank,
     canonical_gco_hash,
@@ -121,9 +121,7 @@ class GCODerivationRuntime:
             parent_permission = parent_permissions.get(requested_permission.namespace)
             if parent_permission is None:
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
-            requested_access = _access_rank(requested_permission.access_mode)
-            parent_access = _access_rank(parent_permission.access_mode)
-            if requested_access is None or parent_access is None or requested_access > parent_access:
+            if not _access_allows(parent_permission.access_mode, requested_permission.access_mode):
                 raise GCODerivationException(DerivationError.STATE_PERMISSION_EXPANDED)
             requested_taint = _taint_rank(requested_permission.taint_policy)
             parent_taint = _taint_rank(parent_permission.taint_policy)

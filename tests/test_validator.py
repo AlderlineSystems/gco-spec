@@ -213,6 +213,21 @@ def test_validate_rejects_duplicate_state_namespace_in_parent(valid_root_gco, va
     assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
 
 
+def test_validate_rejects_child_read_from_parent_append(valid_root_gco):
+    parent = make_root_gco(
+        state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.APPEND)]
+    )
+    child = make_child_gco(
+        parent,
+        state_access_permissions=[StatePermission(namespace="log", access_mode=AccessMode.READ)],
+    )
+
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCOValidator().validate(parent, child)
+
+    assert exc_info.value.error is DerivationError.STATE_PERMISSION_EXPANDED
+
+
 def test_validate_rejects_duplicate_tool_uri_in_child(valid_root_gco, valid_child_gco):
     child = valid_child_gco(valid_root_gco)
     tools = [

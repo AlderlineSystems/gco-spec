@@ -38,7 +38,7 @@ class GovernedStateStore:
 
     def read(self, namespace: str, key: str, gco: GCO) -> bytes:
         permission = self._permission_for(namespace, gco)
-        if permission.access_mode not in {AccessMode.READ, AccessMode.WRITE, AccessMode.APPEND}:
+        if permission.access_mode not in {AccessMode.READ, AccessMode.WRITE}:
             raise NamespaceAccessDenied(f"read denied for namespace {namespace}")
         storage_key = (namespace, key)
         if storage_key not in self._values or storage_key not in self._taints:

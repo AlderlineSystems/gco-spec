@@ -43,6 +43,8 @@ def test_append_allows_new_key_and_rejects_existing_key():
     store.write("log", "entry", b"first", gco)
     with pytest.raises(NamespaceAccessDenied, match="append denied for existing key log/entry"):
         store.write("log", "entry", b"second", gco)
+    with pytest.raises(NamespaceAccessDenied, match="read denied for namespace log"):
+        store.read("log", "entry", gco)
 
 
 def test_read_rejects_none_access():

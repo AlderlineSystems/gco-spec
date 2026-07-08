@@ -387,10 +387,6 @@ def test_authorize_state_access_write_requires_write_grant_not_append():
 def test_authorize_state_access_is_at_least_as_strict_as_store_permission_gate(
     granted_mode: AccessMode, requested_mode: AccessMode
 ):
-    # The runtime gate requires granted_rank >= requested_rank (strict rank comparison).
-    # The store's own write() gate is coarser (WRITE and APPEND grants can both call
-    # write()), so the runtime must never be more permissive than the store, but it can
-    # be stricter (e.g. an APPEND grant no longer satisfies a WRITE request here).
     key = _key()
     namespace = "memory"
     store = GovernedStateStore()
@@ -680,6 +676,7 @@ def test_write_state_append_mode_allows_new_key_and_denies_overwrite():
     created = runtime.write_state(appender, "log", "entry", b"first", mode=AccessMode.APPEND)
     overwritten = runtime.write_state(appender, "log", "entry", b"second", mode=AccessMode.APPEND)
     write_mode = runtime.write_state(appender, "log", "other", b"second")
+    read = runtime.read_state(appender, "log", "entry")
 
     assert created == Decision(allowed=True)
     assert overwritten.allowed is False
@@ -687,6 +684,9 @@ def test_write_state_append_mode_allows_new_key_and_denies_overwrite():
     assert overwritten.reason == "append denied for existing key log/entry"
     assert write_mode.allowed is False
     assert write_mode.error_code is NamespaceAccessDenied
+    assert read.allowed is False
+    assert read.error_code is NamespaceAccessDenied
+    assert read.reason == "read denied for namespace log"
     assert store._values == {("log", "entry"): b"first"}
 
 

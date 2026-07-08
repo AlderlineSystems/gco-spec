@@ -24,7 +24,7 @@ from gco.state_store import GovernedStateStore, NamespaceAccessDenied, TaintedSt
 ACCESS = [AccessMode.NONE, AccessMode.READ, AccessMode.APPEND, AccessMode.WRITE]
 TAINT = [TaintPolicy.CLEAN, TaintPolicy.SANITIZED, TaintPolicy.TAINTED, TaintPolicy.ISOLATED]
 TAINT_RANK = {t: i for i, t in enumerate(TAINT)}
-READ_OK = {AccessMode.READ, AccessMode.WRITE, AccessMode.APPEND}
+READ_OK = {AccessMode.READ, AccessMode.WRITE}
 WRITE_OK = {AccessMode.WRITE, AccessMode.APPEND}
 BLOCKED_TAINT = {TaintPolicy.TAINTED, TaintPolicy.ISOLATED}
 NAMESPACES = ["a", "b", "c"]
@@ -38,7 +38,7 @@ def make_gco(perm: StatePermission) -> GCO:
         span_id=uuid4(),
         parent_span_id=None,
         policy_id="p",
-        model_identity="m",
+        model_identity="spiffe://example.org/ns/default/sa/model-state-fuzz",
         intervention_version="iv",
         tool_authority=[],
         state_access_permissions=[perm],

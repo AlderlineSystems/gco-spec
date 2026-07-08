@@ -29,7 +29,7 @@ def rand_parent(rng: random.Random) -> GCO:
         span_id=uuid4(),
         parent_span_id=None,
         policy_id="p",
-        model_identity="m",
+        model_identity="spiffe://example.org/ns/default/sa/model-fuzz",
         intervention_version="iv",
         tool_authority=[ToolAuthority(tool_uri="https://t.example/a", scope="read write admin", max_depth=rng.randint(1, 5))],
         state_access_permissions=[StatePermission(namespace="ns", access_mode=rng.choice(ACCESS), taint_policy=rng.choice(TAINT))],

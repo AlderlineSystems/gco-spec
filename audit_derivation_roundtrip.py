@@ -46,7 +46,7 @@ def make_parent(rng: random.Random) -> GCO:
         span_id=uuid4(),
         parent_span_id=None,
         policy_id="p",
-        model_identity="m",
+        model_identity="spiffe://example.org/ns/default/sa/model-derivation",
         intervention_version="iv",
         tool_authority=[ToolAuthority(tool_uri=TOOL, scope="read write admin", max_depth=rng.randint(1, 6))],
         state_access_permissions=[

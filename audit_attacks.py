@@ -40,7 +40,7 @@ def build_parent(expires_at: datetime, **over) -> GCO:
         span_id=PARENT_SPAN,
         parent_span_id=None,
         policy_id="policy-x",
-        model_identity="model-x",
+        model_identity="spiffe://example.org/ns/default/sa/model-x",
         intervention_version="iv-1",
         tool_authority=[ToolAuthority(tool_uri="https://t.example/a", scope="read write", max_depth=2)],
         state_access_permissions=[

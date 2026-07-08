@@ -235,6 +235,70 @@ def test_jwt_svid_expired(valid_root_gco):
     assert result.error_code is AttestationError.EXPIRED_ATTESTATION
 
 
+def test_jwt_svid_nbf_uses_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["nbf"] = int((VERIFY_TIME - timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_future_nbf_rejected_by_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["nbf"] = int((VERIFY_TIME + timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_jwt_svid_iat_uses_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["iat"] = int((VERIFY_TIME - timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_future_iat_rejected_by_injected_time(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims["iat"] = int((VERIFY_TIME + timedelta(seconds=1)).timestamp())
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+@pytest.mark.parametrize("claim", ["nbf", "iat"])
+def test_jwt_svid_malformed_time_claim_rejected(claim, valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    claims = _claims(gco)
+    claims[claim] = "not-a-timestamp"
+    attestation = _jwt_attestation(gco, key, claims=claims)
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
 def test_jwt_svid_missing_exp_is_malformed(valid_root_gco):
     gco = _with_identity(valid_root_gco)
     key = _rsa_key()

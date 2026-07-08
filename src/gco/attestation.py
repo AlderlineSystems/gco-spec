@@ -69,7 +69,16 @@ class AttestationVerifier:
     def _verify_jwt_svid(self, token: str, gco: GCO, now: datetime) -> VerificationResult:
         try:
             header = jwt.get_unverified_header(token)
-            payload = jwt.decode(token, options={"verify_signature": False})
+            payload = jwt.decode(
+                token,
+                options={
+                    "verify_signature": False,
+                    "verify_aud": False,
+                    "verify_exp": False,
+                    "verify_nbf": False,
+                    "verify_iat": False,
+                },
+            )
         except Exception:  # noqa: BLE001
             return _failure(AttestationError.MALFORMED_ATTESTATION, "JWT-SVID is malformed")
 
@@ -176,7 +185,12 @@ def _decode_with_key(
             token,
             key=key,
             algorithms=list(allowed),
-            options={"verify_aud": False, "verify_exp": False},
+            options={
+                "verify_aud": False,
+                "verify_exp": False,
+                "verify_nbf": False,
+                "verify_iat": False,
+            },
         )
     except jwt.InvalidSignatureError:
         return _failure(AttestationError.UNVERIFIED_SIGNATURE, "JWS signature could not be verified")
@@ -204,6 +218,18 @@ def _verify_bindings(
         return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation exp claim is missing")
     if datetime.fromtimestamp(exp, timezone.utc) <= now:
         return _failure(AttestationError.EXPIRED_ATTESTATION, "attestation is expired")
+    nbf = payload.get("nbf")
+    if nbf is not None:
+        if not isinstance(nbf, int | float):
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation nbf claim is malformed")
+        if datetime.fromtimestamp(nbf, timezone.utc) > now:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation is not yet valid")
+    iat = payload.get("iat")
+    if iat is not None:
+        if not isinstance(iat, int | float):
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation iat claim is malformed")
+        if datetime.fromtimestamp(iat, timezone.utc) > now:
+            return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation was issued in the future")
     return VerificationResult(verified=True)
 
 

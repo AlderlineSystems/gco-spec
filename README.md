@@ -15,8 +15,8 @@ or resolved separately when the namespace is made externally fetchable.
 ## Components
 
 1. `src/gco/models.py` defines the strict Pydantic data model.
-2. `src/gco/validator.py` validates child GCOs against parent GCOs. The existing `validate()` API returns `True` or raises `GCODerivationException`; `validate_result()` returns a `ValidationResult(valid=False, error_code=...)` for callers that prefer non-throwing fail-closed handling, including malformed raw payloads via `GCO_MALFORMED`.
-3. `src/gco/derivation.py` mints tightened child GCOs from delegation requests.
+2. `src/gco/validator.py` validates child GCOs against parent GCOs. The existing `validate()` API returns `True` or raises `GCODerivationException`; `validate_result()` returns a `ValidationResult(valid=False, error_code=...)` for callers that prefer non-throwing fail-closed handling, including malformed raw payloads via `GCO_MALFORMED`. Tool depth may only shrink: a child can request a lower `max_depth`, but never more than the parent's remaining depth.
+3. `src/gco/derivation.py` mints tightened child GCOs from delegation requests. Requested tool depth is capped to the parent's remaining depth, and `attestation_identity` overrides are rejected; children are attested for the parent's `model_identity`.
 4. `src/gco/state_store.py` enforces namespace ACLs and taint labels.
 5. `src/gco/trust.py` loads offline trust bundles for SPIFFE trust domains.
 6. `src/gco/attestation.py` verifies supported attestations against those bundles.
@@ -31,6 +31,9 @@ pytest --cov=src/gco --cov-branch --cov-report=term-missing -q
 ```
 
 The intended build order is validator, derivation runtime, state store, then DER harness. Each phase is covered by focused tests in `tests/`.
+
+Model and schema URI fields intentionally accept generic URI schemes, including
+SPIFFE IDs and URNs, rather than only HTTP(S) URLs.
 
 ## Project status
 
@@ -68,6 +71,6 @@ Trust bundles may be loaded from a mapping or JSON file shaped as either
 
 **Use `GovernanceRuntime` as the authority gate.** The package also exports `GCOValidator`, `GovernedStateStore`, `GCODerivationRuntime`, and `AttestationVerifier` for testing and composition, but calling them directly bypasses attestation verification. Production hosts should route tool calls, sub-call authorization, derivation, and state access through `GovernanceRuntime` methods (`authorize_tool_call`, `authorize_subcall`, `derive_for_subcall`, `read_state`, `write_state`). Use `write_state(..., mode=AccessMode.APPEND)` for append-only writes; the default `AccessMode.WRITE` remains required for overwrite-capable writes.
 
-**State access is two-step by design.** `authorize_state_access()` checks ACL grants only; `read_state()` / `write_state()` also enforce per-key taint at access time. Do not call `GovernedStateStore` directly from host code.
+**State access is two-step by design.** `authorize_state_access()` checks ACL grants only; `read_state()` / `write_state()` also enforce per-key taint at access time. `AccessMode.APPEND` allows creating new keys but does not grant reads or overwrites; `AccessMode.WRITE` grants read, append, and overwrite authority. Do not call `GovernedStateStore` directly from host code.
 
-**Attestation verification limits.** JWT verification pins algorithms to the trusted key type, binds attestations to `canonical_gco_hash(gco)`, and checks `exp` against the injected clock. `aud` (audience) is not verified (`verify_aud: False`), and there is no revocation or `jti` replay cache — a valid `(GCO, attestation)` pair may be replayed until expiry.
+**Attestation verification limits.** JWT verification pins algorithms to the trusted key type, binds attestations to `canonical_gco_hash(gco)`, and checks `exp`, `nbf`, and `iat` against the injected clock. `aud` (audience) is not verified (`verify_aud: False`), and there is no revocation or `jti` replay cache — a valid `(GCO, attestation)` pair may be replayed until expiry.

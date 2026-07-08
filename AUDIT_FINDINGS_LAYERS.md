@@ -108,7 +108,7 @@ Probed directly across 20k random parents (varying lineage depth 0–3): could n
 
 ### derivation.py verdict — **release-ready for the round-trip security property**, with two low-severity flags:
 - **(LOW, drift)** immutable-field set duplicated between validator equality checks and `derive()` constructor — should share one source of truth.
-- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. Related: the runtime hardcodes `GCOValidator()` with the default wall clock and offers no clock injection, so derivation-expiry behavior is only testable via the 2099 fixture horizon.
+- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. The runtime now passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
 
 ---
 
@@ -131,6 +131,6 @@ No branch is missing. The historical state-store holes (KeyError, laundering, fa
 
 ## Per-file verdict
 - **`state_store.py`: RESOLVED → release-ready** (was NOT release-ready at audit time). The audit found uncaught `KeyError` (14/20k), taint laundering (4085/20k), unknown-taint fail-open, no reader alignment, plus test-quality gaps — fuzz then **FAILED** with 4099 violations. After the fixes (see resolution note at top), the state store denies missing keys cleanly, preserves taint monotonically, fails closed on unrankable taint, and enforces reader-vs-data taint alignment.
-- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). Two low-severity flags remain open: implicit immutable-set duplication and attestation-minted-before-validate.
+- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). Two low-severity flags remain open: implicit immutable-set duplication and attestation-minted-before-validate; the earlier runtime clock-injection concern is resolved.
 
 The state-store fix has landed; the two `derivation.py` low-severity flags are still open.

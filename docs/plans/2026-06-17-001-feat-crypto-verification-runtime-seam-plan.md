@@ -271,12 +271,12 @@ The per-unit `**Files:**` sections are authoritative; the tree is the expected s
 
 ---
 
-## Open Questions (resolve at execution)
+## Resolved Questions
 
 - Exact JOSE library: resolved as `PyJWT`, listed in runtime dependencies.
-- Exact `cryptography.x509.verification` API surface for custom SPIFFE-SAN policy (confirmed present in v49; precise `PolicyBuilder` usage settled when U3 is written).
-- Whether `model_identity` is the right field to match the SPIFFE ID against, or whether a dedicated SPIFFE-ID convention is needed — confirm against `positioning.md`'s "attested workload identity"; default: `model_identity`.
-- Whether `AttestationModel` needs an optional issuer/`kid` hint — prefer no model change; confirm during U2.
+- Exact `cryptography.x509.verification` API surface: resolved in the verifier implementation.
+- SPIFFE identity binding field: resolved as `model_identity`.
+- Attestation issuer hint: `AttestationModel.issuer` remains optional; no `kid` model field was added.
 
 ---
 

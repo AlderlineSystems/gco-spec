@@ -22,5 +22,6 @@ trust bundle, SPIFFE identity binding, GCO digest binding, and expiry.
 
 The `raw-jws` and `tpm-quote` formats are declared by the model but are not
 cryptographically verified here; they fail closed at the verifier/runtime seam.
-JWT audience is not verified, and there is no revocation or `jti` replay cache.
-A valid `(GCO, attestation)` pair can be replayed until expiry.
+JWT `exp`, `nbf`, and `iat` claims are checked against the injected clock, but
+audience is not verified, and there is no revocation or `jti` replay cache. A
+valid `(GCO, attestation)` pair can be replayed until expiry.

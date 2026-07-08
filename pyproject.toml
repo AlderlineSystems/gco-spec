@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gco-spec"
 version = "0.1.0"
-description = "Reference implementation for Sovereign Safety Labs GCO derivation contracts."
+description = "Reference implementation for Alderline Systems GCO derivation contracts."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

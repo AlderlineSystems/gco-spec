@@ -58,9 +58,10 @@ class PreviewSigningAuthority:
 def main(argv: list[str] | None = None) -> int:
     stdout = sys.stdout
     stderr = sys.stderr
-    as_json = bool(argv and "--json" in argv)
+    raw_argv = sys.argv[1:] if argv is None else argv
+    as_json = "--json" in raw_argv
     try:
-        args = _build_parser().parse_args(argv)
+        args = _build_parser().parse_args(raw_argv)
         as_json = bool(args.json)
         return args.func(args, stdout, stderr)
     except CLIError as exc:
@@ -164,7 +165,10 @@ def _cmd_derive(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int
             _emit_failure(code, str(exc), args.json, stdout, stderr, prefix="deny")
             return FAILURE
         payload = {"preview_only": True, "warning": "unsigned derivation is preview-only", "child": child.model_dump(mode="json")}
-    _emit_success(payload, args.json, stdout, human=json.dumps(payload["child"], indent=2, sort_keys=True))
+    human = json.dumps(payload["child"], indent=2, sort_keys=True)
+    if payload["preview_only"]:
+        human = f"warning: {payload['warning']}\n{human}"
+    _emit_success(payload, args.json, stdout, human=human)
     return SUCCESS
 
 

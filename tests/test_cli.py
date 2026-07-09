@@ -233,6 +233,24 @@ def test_derive_without_signing_key_outputs_preview_only_child(cli_files, capsys
     assert output["child"]["attestation"]["value"].startswith("preview-unsigned:")
 
 
+def test_derive_without_signing_key_human_output_warns(cli_files, capsys):
+    status = cli.main(
+        [
+            "derive",
+            str(cli_files["parent"]),
+            "--request",
+            str(cli_files["request"]),
+            "--trust-bundle",
+            str(cli_files["bundle"]),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert captured.out.startswith("warning: unsigned derivation is preview-only\n")
+    assert '"value": "preview-unsigned:spiffe://example.org/ns/default/sa/model-alpha"' in captured.out
+
+
 def test_derive_without_signing_key_denies_invalid_request(cli_files, tmp_path, capsys):
     invalid_request = _write_json(
         tmp_path / "invalid-preview-request.json",
@@ -363,6 +381,21 @@ def test_usage_error_has_stable_code(capsys):
     captured = capsys.readouterr()
     assert status == 2
     assert "USAGE_ERROR" in captured.err
+
+
+def test_console_script_json_usage_error_uses_sys_argv(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["gco", "--json", "validate", "child.json"])
+
+    status = cli.main()
+
+    captured = capsys.readouterr()
+    assert status == 2
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "error_code": "USAGE_ERROR",
+        "message": "the following arguments are required: --parent",
+        "ok": False,
+    }
 
 
 def test_unexpected_cli_error_fails_closed(monkeypatch, capsys):

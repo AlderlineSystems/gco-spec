@@ -25,3 +25,6 @@ All notable changes to this project will be documented in this file.
   validate children before issuing attestations.
 - Added the SDK-agnostic P0 MCP adapter, `com.alderlinesystems.gco` extension
   profile, and MCP boundary audit harness.
+- Added the `gco` console script for validating parent/child chains, verifying
+  attestations against trust bundles, inspecting authority, deriving tightened
+  children, and printing the bundled schema.

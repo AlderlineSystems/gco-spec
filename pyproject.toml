@@ -35,6 +35,9 @@ dependencies = [
     "pydantic>=2.8",
 ]
 
+[project.scripts]
+gco = "gco.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/SSBrouhard/gco-spec"
 Repository = "https://github.com/SSBrouhard/gco-spec"

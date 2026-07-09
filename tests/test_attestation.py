@@ -13,7 +13,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 import gco.attestation as attestation_module
 from conftest import BASE_TIME
-from gco.attestation import AttestationError, AttestationVerifier
+from gco.attestation import AttestationError, AttestationVerifier, InMemoryReplayCache
 from gco.models import AttestationFormat, AttestationModel, GCO
 from gco.trust import TrustBundle
 from gco.validator import canonical_gco_hash
@@ -47,12 +47,25 @@ def _with_identity(gco: GCO) -> GCO:
     return gco.model_copy(update={"model_identity": SPIFFE_ID})
 
 
-def _claims(gco: GCO, *, sub: str = SPIFFE_ID, exp: datetime | None = None, digest: str | None = None) -> dict:
-    return {
+def _claims(
+    gco: GCO,
+    *,
+    sub: str = SPIFFE_ID,
+    exp: datetime | None = None,
+    digest: str | None = None,
+    aud=None,
+    jti: str | None = None,
+) -> dict:
+    claims = {
         "sub": sub,
         "gco_hash": digest or canonical_gco_hash(gco),
         "exp": int((exp or VERIFY_TIME + timedelta(hours=1)).timestamp()),
     }
+    if aud is not None:
+        claims["aud"] = aud
+    if jti is not None:
+        claims["jti"] = jti
+    return claims
 
 
 def _jwt_attestation(gco: GCO, key, *, kid: str = "jwt-key", claims: dict | None = None) -> AttestationModel:
@@ -333,6 +346,116 @@ def test_jwt_svid_missing_exp_is_malformed(valid_root_gco):
 
     assert result.verified is False
     assert result.error_code is AttestationError.MALFORMED_ATTESTATION
+
+
+def test_jwt_svid_audience_is_ignored_without_expected_audience(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    attestation = _jwt_attestation(gco, key, claims=_claims(gco, aud="https://other.example/receiver"))
+
+    result = _verify(attestation, gco, _trust_bundle_for_jwt(key))
+
+    assert result.verified is True
+
+
+def test_jwt_svid_expected_audience_accepts_string_or_list(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    bundle = _trust_bundle_for_jwt(key)
+    string_aud = _jwt_attestation(gco, key, claims=_claims(gco, aud="https://api.example/receiver"))
+    list_aud = _jwt_attestation(gco, key, claims=_claims(gco, aud=["https://other.example", "https://api.example/receiver"]))
+    verifier = AttestationVerifier(bundle, expected_audience=("https://api.example/receiver",))
+
+    assert verifier.verify(string_aud, gco, now=VERIFY_TIME).verified is True
+    assert verifier.verify(list_aud, gco, now=VERIFY_TIME).verified is True
+
+
+@pytest.mark.parametrize("aud", [None, "https://other.example/receiver", [], [123]])
+def test_jwt_svid_expected_audience_rejects_missing_wrong_or_malformed_audience(aud, valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    attestation = _jwt_attestation(gco, key, claims=_claims(gco, aud=aud))
+    verifier = AttestationVerifier(_trust_bundle_for_jwt(key), expected_audience="https://api.example/receiver")
+
+    result = verifier.verify(attestation, gco, now=VERIFY_TIME)
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.AUDIENCE_MISMATCH
+
+
+def test_jwt_svid_uses_trust_bundle_expected_audience(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    jwk = _jwk(key, "jwt-key")
+    bundle = TrustBundle.from_mapping(
+        {
+            "expected_audience": "https://api.example/receiver",
+            "trust_domains": {"example.org": {"jwks": {"keys": [jwk]}}},
+        }
+    )
+    attestation = _jwt_attestation(gco, key, claims=_claims(gco, aud="https://api.example/receiver"))
+
+    assert AttestationVerifier(bundle).verify(attestation, gco, now=VERIFY_TIME).verified is True
+
+
+def test_jwt_svid_verifier_expected_audience_overrides_trust_bundle(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    jwk = _jwk(key, "jwt-key")
+    bundle = TrustBundle.from_mapping(
+        {
+            "expected_audience": "https://bundle.example/receiver",
+            "trust_domains": {"example.org": {"jwks": {"keys": [jwk]}}},
+        }
+    )
+    attestation = _jwt_attestation(gco, key, claims=_claims(gco, aud="https://verifier.example/receiver"))
+    verifier = AttestationVerifier(bundle, expected_audience="https://verifier.example/receiver")
+
+    assert verifier.verify(attestation, gco, now=VERIFY_TIME).verified is True
+
+
+def test_jwt_svid_replay_cache_accepts_first_jti_and_rejects_reuse(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    attestation = _jwt_attestation(gco, key, claims=_claims(gco, jti="token-1"))
+    verifier = AttestationVerifier(_trust_bundle_for_jwt(key), replay_cache=InMemoryReplayCache())
+
+    first = verifier.verify(attestation, gco, now=VERIFY_TIME)
+    second = verifier.verify(attestation, gco, now=VERIFY_TIME)
+
+    assert first.verified is True
+    assert second.verified is False
+    assert second.error_code is AttestationError.REPLAY_DETECTED
+
+
+def test_jwt_svid_missing_jti_rejected_when_replay_cache_enabled(valid_root_gco):
+    gco = _with_identity(valid_root_gco)
+    key = _rsa_key()
+    attestation = _jwt_attestation(gco, key)
+    verifier = AttestationVerifier(_trust_bundle_for_jwt(key), replay_cache=InMemoryReplayCache())
+
+    result = verifier.verify(attestation, gco, now=VERIFY_TIME)
+
+    assert result.verified is False
+    assert result.error_code is AttestationError.JTI_MISSING
+
+
+def test_in_memory_replay_cache_expires_entries_and_evicts_oldest():
+    cache = InMemoryReplayCache(max_entries=1)
+    expires = VERIFY_TIME + timedelta(seconds=10)
+
+    assert cache.check_and_record("seen", expires, VERIFY_TIME) is True
+    assert cache.check_and_record("seen", expires, VERIFY_TIME) is False
+    assert cache.check_and_record("seen", expires, expires) is True
+    assert cache.check_and_record("newer", expires + timedelta(seconds=1), VERIFY_TIME) is True
+    assert cache.check_and_record("seen", expires, VERIFY_TIME) is True
+    cache._entries.clear()
+    cache._evict_oldest()
+
+
+def test_in_memory_replay_cache_rejects_non_positive_max_entries():
+    with pytest.raises(ValueError):
+        InMemoryReplayCache(max_entries=0)
 
 
 def test_verify_accepts_default_and_naive_injected_clocks(valid_root_gco):

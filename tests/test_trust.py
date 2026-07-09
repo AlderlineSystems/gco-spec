@@ -63,19 +63,42 @@ def test_trust_bundle_loads_jwks_and_cas():
 
 def test_trust_bundle_loads_from_trust_domains_wrapper_and_file(tmp_path):
     key = _private_key()
-    config = {"trust_domains": {"example.org": {"jwks": {"keys": [_jwk(key)]}}}}
+    config = {
+        "expected_audience": ["https://api.example/receiver"],
+        "trust_domains": {"example.org": {"jwks": {"keys": [_jwk(key)]}}},
+    }
     path = tmp_path / "bundle.json"
     path.write_text(json.dumps(config), encoding="utf-8")
 
     bundle = TrustBundle.from_json_file(path)
 
     assert bundle.get("example.org").key("kid-1") is not None
+    assert bundle.expected_audience == ("https://api.example/receiver",)
 
 
 def test_empty_and_unknown_domain_are_controlled_misses():
     bundle = TrustBundle.from_mapping({})
 
     assert bundle.get("missing.example") is None
+
+
+def test_trust_bundle_flat_mapping_ignores_expected_audience_metadata():
+    key = _private_key()
+    bundle = TrustBundle.from_mapping(
+        {
+            "expected_audience": "https://api.example/receiver",
+            "example.org": {"jwks": {"keys": [_jwk(key)]}},
+        }
+    )
+
+    assert bundle.get("example.org").key("kid-1") is not None
+    assert bundle.expected_audience == ("https://api.example/receiver",)
+
+
+@pytest.mark.parametrize("expected_audience", ["", [], ["ok", ""], [123], {"aud": "x"}])
+def test_trust_bundle_rejects_malformed_expected_audience(expected_audience):
+    with pytest.raises(TrustBundleError):
+        TrustBundle.from_mapping({"expected_audience": expected_audience})
 
 
 def test_non_mapping_config_raises_trust_bundle_error():

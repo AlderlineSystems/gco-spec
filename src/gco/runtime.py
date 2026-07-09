@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from gco.attestation import AttestationError, AttestationVerifier
+from gco.attestation import AttestationError, AttestationVerifier, ReplayCache
 from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivationRuntime
 from gco.models import AccessMode, GCO
 from gco.state_store import GovernedStateStore, NamespaceAccessDenied, StateKeyNotFound, TaintedStateRead
@@ -38,10 +38,17 @@ class GovernanceRuntime:
         state_store: GovernedStateStore | None = None,
         attestation_authority: AttestationAuthority | None = None,
         now: Callable[[], datetime] | None = None,
+        expected_audience: str | tuple[str, ...] | None = None,
+        replay_cache: ReplayCache | None = None,
     ) -> None:
         self._now = now or (lambda: datetime.now(timezone.utc))
         self.trust_bundle = trust_bundle
-        self.verifier = verifier or AttestationVerifier(trust_bundle, now=self._now)
+        self.verifier = verifier or AttestationVerifier(
+            trust_bundle,
+            now=self._now,
+            expected_audience=expected_audience,
+            replay_cache=replay_cache,
+        )
         self.validator = validator or GCOValidator(now=self._now)
         self.state_store = state_store or GovernedStateStore()
         self.attestation_authority = attestation_authority

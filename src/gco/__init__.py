@@ -1,6 +1,6 @@
 """GCO reference implementation."""
 
-from gco.attestation import AttestationError, AttestationVerifier, VerificationResult
+from gco.attestation import AttestationError, AttestationVerifier, InMemoryReplayCache, ReplayCache, VerificationResult
 from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivationRuntime
 from gco.der_harness import DERHarness, RecursiveTranscript, Transcript
 from gco.models import (
@@ -34,7 +34,9 @@ __all__ = [
     "GCOValidator",
     "GovernanceRuntime",
     "GovernedStateStore",
+    "InMemoryReplayCache",
     "NamespaceAccessDenied",
+    "ReplayCache",
     "RecursiveTranscript",
     "StatePermission",
     "TaintPolicy",

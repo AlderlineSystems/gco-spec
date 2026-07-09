@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import base64
 import math
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 import jwt
 from cryptography import x509
@@ -26,6 +27,9 @@ class AttestationError(Enum):
     SPIFFE_ID_MISMATCH = "spiffe_id_mismatch"
     GCO_DIGEST_MISMATCH = "gco_digest_mismatch"
     EXPIRED_ATTESTATION = "expired_attestation"
+    AUDIENCE_MISMATCH = "audience_mismatch"
+    JTI_MISSING = "jti_missing"
+    REPLAY_DETECTED = "replay_detected"
     UNSUPPORTED_FORMAT = "unsupported_format"
     MALFORMED_ATTESTATION = "malformed_attestation"
 
@@ -39,6 +43,57 @@ class VerificationResult:
     message: str | None = None
 
 
+class ReplayCache(Protocol):
+    """Replay cache contract for atomically accepting a jti once until expiry.
+
+    Horizontally scaled hosts should provide a shared or state-synchronized
+    implementation, or use short attestation TTLs to bound cross-instance replay
+    exposure when only per-instance caches are available.
+    """
+
+    def check_and_record(self, jti: str, expires_at: datetime, now: datetime) -> bool:
+        """Return True only when ``jti`` was not already recorded and is now stored."""
+        ...
+
+
+class InMemoryReplayCache:
+    """Bounded in-process replay cache.
+
+    This protects only one Python process. Multi-instance deployments should
+    provide a shared ``ReplayCache`` implementation with the same atomic
+    check-and-record semantics, or keep attestation TTLs short enough to bound
+    the cross-instance replay window.
+    """
+
+    def __init__(self, max_entries: int = 10000) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self._max_entries = max_entries
+        self._entries: dict[str, datetime] = {}
+        self._lock = threading.Lock()
+
+    def check_and_record(self, jti: str, expires_at: datetime, now: datetime) -> bool:
+        with self._lock:
+            self._evict_expired(now)
+            if jti in self._entries:
+                return False
+            if len(self._entries) >= self._max_entries:
+                self._evict_oldest()
+            self._entries[jti] = expires_at
+            return True
+
+    def _evict_expired(self, now: datetime) -> None:
+        for jti, expires_at in tuple(self._entries.items()):
+            if expires_at <= now:
+                del self._entries[jti]
+
+    def _evict_oldest(self) -> None:
+        if not self._entries:
+            return
+        oldest = min(self._entries, key=self._entries.__getitem__)
+        del self._entries[oldest]
+
+
 class AttestationVerifier:
     """Verify GCO-bound JWT-SVID and X.509-SVID attestations."""
 
@@ -46,9 +101,13 @@ class AttestationVerifier:
         self,
         trust_bundle: TrustBundle,
         now: Callable[[], datetime] | None = None,
+        expected_audience: str | tuple[str, ...] | None = None,
+        replay_cache: ReplayCache | None = None,
     ) -> None:
         self._trust_bundle = trust_bundle
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._expected_audience = _coerce_expected_audience(expected_audience) or trust_bundle.expected_audience
+        self._replay_cache = replay_cache
 
     def verify(
         self,
@@ -96,7 +155,13 @@ class AttestationVerifier:
         if isinstance(decoded, VerificationResult):
             return decoded
 
-        return _verify_bindings(decoded, gco, now)
+        return _verify_bindings(
+            decoded,
+            gco,
+            now,
+            expected_audience=self._expected_audience,
+            replay_cache=self._replay_cache,
+        )
 
     def _verify_x509_svid(self, token: str, gco: GCO, now: datetime) -> VerificationResult:
         try:
@@ -121,7 +186,14 @@ class AttestationVerifier:
         if isinstance(decoded, VerificationResult):
             return decoded
 
-        return _verify_bindings(decoded, gco, now, expected_sub=leaf_spiffe)
+        return _verify_bindings(
+            decoded,
+            gco,
+            now,
+            expected_sub=leaf_spiffe,
+            expected_audience=self._expected_audience,
+            replay_cache=self._replay_cache,
+        )
 
 
 def _coerce_now(
@@ -136,6 +208,14 @@ def _coerce_now(
 
 def _failure(error: AttestationError, message: str) -> VerificationResult:
     return VerificationResult(verified=False, error_code=error, message=message)
+
+
+def _coerce_expected_audience(value: str | tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
 
 
 def _trust_domain(spiffe_id: Any) -> str | None:
@@ -208,12 +288,18 @@ def _verify_bindings(
     now: datetime,
     *,
     expected_sub: str | None = None,
+    expected_audience: tuple[str, ...] | None = None,
+    replay_cache: ReplayCache | None = None,
 ) -> VerificationResult:
     subject = payload.get("sub")
     if subject != (expected_sub or gco.model_identity):
         return _failure(AttestationError.SPIFFE_ID_MISMATCH, "attestation subject does not match GCO model identity")
     if payload.get("gco_hash") != canonical_gco_hash(gco):
         return _failure(AttestationError.GCO_DIGEST_MISMATCH, "attestation digest does not bind this GCO")
+    if expected_audience is not None:
+        audience_result = _verify_audience(payload.get("aud"), expected_audience)
+        if audience_result is not None:
+            return audience_result
     exp = payload.get("exp")
     if not isinstance(exp, int | float):
         return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation exp claim is missing")
@@ -240,7 +326,31 @@ def _verify_bindings(
             return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation iat claim is malformed")
         if iat_time > now:
             return _failure(AttestationError.MALFORMED_ATTESTATION, "attestation was issued in the future")
+    if replay_cache is not None:
+        replay_result = _verify_replay(payload.get("jti"), exp_time, now, replay_cache)
+        if replay_result is not None:
+            return replay_result
     return VerificationResult(verified=True)
+
+
+def _verify_audience(audience: Any, expected_audience: tuple[str, ...]) -> VerificationResult | None:
+    if isinstance(audience, str):
+        actual = (audience,)
+    elif isinstance(audience, list) and all(isinstance(item, str) for item in audience):
+        actual = tuple(audience)
+    else:
+        return _failure(AttestationError.AUDIENCE_MISMATCH, "attestation audience is missing or malformed")
+    if set(actual).isdisjoint(expected_audience):
+        return _failure(AttestationError.AUDIENCE_MISMATCH, "attestation audience does not match verifier audience")
+    return None
+
+
+def _verify_replay(jti: Any, exp_time: datetime, now: datetime, replay_cache: ReplayCache) -> VerificationResult | None:
+    if not isinstance(jti, str) or not jti:
+        return _failure(AttestationError.JTI_MISSING, "attestation jti claim is required when replay protection is enabled")
+    if not replay_cache.check_and_record(jti, exp_time, now):
+        return _failure(AttestationError.REPLAY_DETECTED, "attestation jti has already been seen")
+    return None
 
 
 def _numeric_date(value: int | float) -> datetime | None:

@@ -23,7 +23,7 @@ Before opening a pull request:
 4. Confirm `schemas/gco_schema_v1.json` remains packaged.
 
 The JSON Schema `$id` is a stable namespace identifier. Do not change
-`https://sovereignsafetylabs.org/schemas/gco_schema_v1.json` without an
+`https://alderlinesystems.com/schemas/gco_schema_v1.json` without an
 explicit maintainer decision.
 
 ## Contribution terms

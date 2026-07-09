@@ -8,9 +8,9 @@ repository yet; until one is published, treat this package and the bundled
 schema as the implementation-facing reference material.
 
 The schema identifier
-`https://sovereignsafetylabs.org/schemas/gco_schema_v1.json` is a stable JSON
-Schema namespace and intentionally remains unchanged. The URL should be hosted
-or resolved separately when the namespace is made externally fetchable.
+`https://alderlinesystems.com/schemas/gco_schema_v1.json` is the JSON Schema
+namespace. The URL should be hosted or resolved separately when the namespace is
+made externally fetchable.
 
 ## Components
 

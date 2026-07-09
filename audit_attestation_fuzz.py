@@ -15,7 +15,7 @@ from uuid import UUID
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from gco.attestation import AttestationVerifier
+from gco.attestation import AttestationVerifier, InMemoryReplayCache
 from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, TaintPolicy, ToolAuthority
 from gco.trust import TrustBundle
 from gco.validator import canonical_gco_hash
@@ -59,12 +59,25 @@ def gco() -> GCO:
     )
 
 
-def _claims(subject: GCO, *, digest: str | None = None, exp: datetime | None = None, sub: str = SPIFFE_ID) -> dict:
-    return {
+def _claims(
+    subject: GCO,
+    *,
+    digest: str | None = None,
+    exp: datetime | None = None,
+    sub: str = SPIFFE_ID,
+    aud=None,
+    jti: str | None = None,
+) -> dict:
+    claims = {
         "sub": sub,
         "gco_hash": digest or canonical_gco_hash(subject),
         "exp": int((exp or NOW + timedelta(hours=1)).timestamp()),
     }
+    if aud is not None:
+        claims["aud"] = aud
+    if jti is not None:
+        claims["jti"] = jti
+    return claims
 
 
 def _random_token(rng: random.Random) -> str:
@@ -133,7 +146,39 @@ def main() -> None:
     print(f"uncaught exceptions:   {uncaught}")
     for example in examples:
         print("  example:", example)
-    bad = verified_forgeries + uncaught
+
+    valid_wrong_audience = AttestationModel(
+        format=AttestationFormat.JWT_SVID,
+        value=jwt.encode(
+            _claims(subject, aud="https://wrong.example/receiver"),
+            TRUSTED_KEY,
+            algorithm="RS256",
+            headers={"kid": "trusted"},
+        ),
+    )
+    wrong_audience_verified = AttestationVerifier(BUNDLE, expected_audience="https://api.example/receiver").verify(
+        valid_wrong_audience,
+        subject,
+        now=NOW,
+    ).verified
+
+    replayed = AttestationModel(
+        format=AttestationFormat.JWT_SVID,
+        value=jwt.encode(
+            _claims(subject, jti="replay-1"),
+            TRUSTED_KEY,
+            algorithm="RS256",
+            headers={"kid": "trusted"},
+        ),
+    )
+    replay_verifier = AttestationVerifier(BUNDLE, replay_cache=InMemoryReplayCache())
+    replay_first_verified = replay_verifier.verify(replayed, subject, now=NOW).verified
+    replay_second_verified = replay_verifier.verify(replayed, subject, now=NOW).verified
+    replay_attack_verified = (not replay_first_verified) or replay_second_verified
+
+    print(f"wrong audience verified:{wrong_audience_verified:>5}")
+    print(f"replay accepted:        {replay_attack_verified:>5}")
+    bad = verified_forgeries + uncaught + int(wrong_audience_verified) + int(replay_attack_verified)
     print("RESULT:", "PASS" if bad == 0 else "**FAIL**")
     if bad:
         raise SystemExit(1)

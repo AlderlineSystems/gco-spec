@@ -8,7 +8,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from conftest import BASE_TIME, make_child_gco, make_root_gco
-from gco.attestation import AttestationError
+from gco.attestation import AttestationError, InMemoryReplayCache
 from gco.derivation import DelegationRequest
 from gco.models import AccessMode, AttestationFormat, AttestationModel, GCO, StatePermission, TaintPolicy, ToolAuthority
 from gco.runtime import Decision, GovernanceRuntime
@@ -34,18 +34,23 @@ def _bundle(key, *, kid: str = "runtime") -> TrustBundle:
     return TrustBundle.from_mapping({"example.org": {"jwks": {"keys": [_jwk(key, kid)]}}})
 
 
-def _claims(gco: GCO, *, exp: datetime | None = None) -> dict:
-    return {
+def _claims(gco: GCO, *, exp: datetime | None = None, aud=None, jti: str | None = None) -> dict:
+    claims = {
         "sub": gco.model_identity,
         "gco_hash": canonical_gco_hash(gco),
         "exp": int((exp or NOW + timedelta(hours=1)).timestamp()),
     }
+    if aud is not None:
+        claims["aud"] = aud
+    if jti is not None:
+        claims["jti"] = jti
+    return claims
 
 
-def _attestation(gco: GCO, key, *, kid: str = "runtime") -> AttestationModel:
+def _attestation(gco: GCO, key, *, kid: str = "runtime", claims: dict | None = None) -> AttestationModel:
     return AttestationModel(
         format=AttestationFormat.JWT_SVID,
-        value=jwt.encode(_claims(gco), key, algorithm="RS256", headers={"kid": kid}),
+        value=jwt.encode(claims or _claims(gco), key, algorithm="RS256", headers={"kid": kid}),
     )
 
 
@@ -53,8 +58,8 @@ def _with_identity(gco: GCO) -> GCO:
     return gco.model_copy(update={"model_identity": SPIFFE_ID})
 
 
-def _sign(gco: GCO, key, *, kid: str = "runtime") -> GCO:
-    return gco.model_copy(update={"attestation": _attestation(gco, key, kid=kid)})
+def _sign(gco: GCO, key, *, kid: str = "runtime", claims: dict | None = None) -> GCO:
+    return gco.model_copy(update={"attestation": _attestation(gco, key, kid=kid, claims=claims)})
 
 
 def _parent_child(key):
@@ -88,6 +93,39 @@ def test_authorize_subcall_allows_authentic_tightening():
     decision = GovernanceRuntime(_bundle(key), now=lambda: NOW).authorize_subcall(parent, child)
 
     assert decision == Decision(allowed=True)
+
+
+def test_runtime_constructor_wires_expected_audience_and_replay_cache():
+    key = _key()
+    parent = _with_identity(make_root_gco())
+    child = make_child_gco(parent)
+    parent = _sign(parent, key, claims=_claims(parent, aud="https://api.example/receiver", jti="parent-1"))
+    child = _sign(child, key, claims=_claims(child, aud="https://api.example/receiver", jti="child-1"))
+    runtime = GovernanceRuntime(
+        _bundle(key),
+        now=lambda: NOW,
+        expected_audience="https://api.example/receiver",
+        replay_cache=InMemoryReplayCache(),
+    )
+
+    first = runtime.authorize_subcall(parent, child)
+    second = runtime.authorize_subcall(parent, child)
+
+    assert first.allowed is True
+    assert second.allowed is False
+    assert second.error_code is AttestationError.REPLAY_DETECTED
+
+
+def test_runtime_constructor_denies_wrong_audience():
+    key = _key()
+    subject = _with_identity(make_root_gco())
+    subject = _sign(subject, key, claims=_claims(subject, aud="https://other.example/receiver"))
+    runtime = GovernanceRuntime(_bundle(key), now=lambda: NOW, expected_audience="https://api.example/receiver")
+
+    decision = runtime.authorize_tool_call(subject, "https://tools.example/search")
+
+    assert decision.allowed is False
+    assert decision.error_code is AttestationError.AUDIENCE_MISMATCH
 
 
 def test_authorize_subcall_denies_authentic_expansion_with_derivation_error():
@@ -658,6 +696,37 @@ def test_read_state_and_write_state_round_trip():
 
     written = runtime.write_state(writer, "memory", "answer", b"42")
     read = runtime.read_state(writer, "memory", "answer")
+
+    assert written == Decision(allowed=True)
+    assert read.allowed is True
+    assert read.value == b"42"
+
+
+def test_state_read_and_write_do_not_reverify_replay_protected_attestation():
+    key = _key()
+    store = GovernedStateStore()
+    writer_subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[
+                StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.SANITIZED)
+            ]
+        )
+    )
+    reader_subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[
+                StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.SANITIZED)
+            ]
+        )
+    )
+    writer = _sign(writer_subject, key, claims=_claims(writer_subject, jti="write-1"))
+    reader = _sign(reader_subject, key, claims=_claims(reader_subject, jti="read-1"))
+    store._values[("memory", "answer")] = b"42"
+    store._taints[("memory", "answer")] = TaintPolicy.SANITIZED
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW, replay_cache=InMemoryReplayCache())
+
+    written = runtime.write_state(writer, "memory", "other", b"84")
+    read = runtime.read_state(reader, "memory", "answer")
 
     assert written == Decision(allowed=True)
     assert read.allowed is True

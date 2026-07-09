@@ -33,14 +33,21 @@ class TrustDomainBundle:
 
 @dataclass(frozen=True)
 class TrustBundle:
-    """Offline trust configuration keyed by SPIFFE trust domain."""
+    """Offline trust configuration keyed by SPIFFE trust domain.
+
+    ``expected_audience`` is optional verifier metadata; when present, the
+    default verifier/runtime requires matching attestation ``aud`` claims.
+    """
 
     domains: Mapping[str, TrustDomainBundle]
+    expected_audience: tuple[str, ...] | None = None
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "TrustBundle":
         try:
-            domains = config.get("trust_domains", config)
+            domains = config.get("trust_domains")
+            if domains is None:
+                domains = {key: value for key, value in config.items() if key != "expected_audience"}
         except AttributeError as exc:
             raise TrustBundleError("trust bundle config must be a mapping") from exc
 
@@ -49,7 +56,7 @@ class TrustBundle:
             if not isinstance(domain, str) or not isinstance(material, Mapping):
                 raise TrustBundleError("trust domain entries must be mappings")
             parsed[domain] = _parse_domain(material)
-        return cls(domains=parsed)
+        return cls(domains=parsed, expected_audience=_parse_expected_audience(config.get("expected_audience")))
 
     @classmethod
     def from_json_file(cls, path: str | Path) -> "TrustBundle":
@@ -68,6 +75,18 @@ def _parse_domain(material: Mapping[str, Any]) -> TrustDomainBundle:
     ca_certs = _parse_ca_certs(material.get("ca_certs") or material.get("ca_certificates") or [])
     ca_store = Store(list(ca_certs)) if ca_certs else None
     return TrustDomainBundle(jwks=jwks, ca_certs=ca_certs, ca_store=ca_store)
+
+
+def _parse_expected_audience(value: Any) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if not value:
+            raise TrustBundleError("expected_audience must not be empty")
+        return (value,)
+    if isinstance(value, list) and value and all(isinstance(item, str) and item for item in value):
+        return tuple(value)
+    raise TrustBundleError("expected_audience must be a non-empty string or list of strings")
 
 
 def _parse_jwks(jwks_material: Any) -> Mapping[str, TrustedPublicKey]:

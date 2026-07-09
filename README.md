@@ -205,7 +205,25 @@ Trust bundles may be loaded from a mapping or JSON file shaped as either
 `{"trust_domains": {"example.org": {...}}}` or directly as
 `{"example.org": {...}}`. Each trust-domain entry may include a `jwks` (or
 `jwk_set`) object for `jwt-svid` verification and `ca_certs` (or
-`ca_certificates`) as PEM certificates for `x509-svid` chain validation.
+`ca_certificates`) as PEM certificates for `x509-svid` chain validation. For
+production verifiers, set an expected audience either on the verifier/runtime or
+as top-level trust-bundle metadata:
+`{"expected_audience": "https://receiver.example/endpoint", "trust_domains": {...}}`.
+Replay protection is opt-in through a `ReplayCache` implementation:
+
+```python
+from gco import GovernanceRuntime, InMemoryReplayCache
+
+runtime = GovernanceRuntime(
+    bundle,
+    expected_audience="https://receiver.example/endpoint",
+    replay_cache=InMemoryReplayCache(),
+)
+```
+
+With replay protection enabled, attestations must carry a non-empty `jti`.
+The bundled cache is per process; use a shared/state-synchronized cache for
+multi-instance deployments or keep attestation TTLs short.
 
 ## Security enforcement
 
@@ -213,4 +231,4 @@ Trust bundles may be loaded from a mapping or JSON file shaped as either
 
 **State access is two-step by design.** `authorize_state_access()` checks ACL grants only; `read_state()` / `write_state()` also enforce per-key taint at access time. `AccessMode.APPEND` allows creating new keys but does not grant reads or overwrites; `AccessMode.WRITE` grants read, append, and overwrite authority. Do not call `GovernedStateStore` directly from host code.
 
-**Attestation verification limits.** JWT verification pins algorithms to the trusted key type, binds attestations to `canonical_gco_hash(gco)`, and checks `exp`, `nbf`, and `iat` against the injected clock. `aud` (audience) is not verified (`verify_aud: False`), and there is no revocation or `jti` replay cache — a valid `(GCO, attestation)` pair may be replayed until expiry.
+**Attestation verification limits.** JWT verification pins algorithms to the trusted key type, binds attestations to `canonical_gco_hash(gco)`, and checks `exp`, `nbf`, and `iat` against the injected clock. By default, existing bundles remain compatible: `aud` is ignored unless an expected audience is configured, and `jti` is optional unless a `ReplayCache` is configured. Production deployments should configure `expected_audience` to the receiving trust domain or endpoint identity; when configured, missing or non-matching `aud` fails closed. Production deployments should also configure replay protection and issue short-lived attestations by default. When a `ReplayCache` is configured, missing `jti` and reuse of a seen `jti` fail closed. The bundled `InMemoryReplayCache` is bounded and expires entries at token `exp`, but it is per-process only. Horizontally scaled or multi-instance hosts must either supply a shared or state-synchronized `ReplayCache` implementation with the same atomic check-and-record interface, or keep attestation TTLs short enough to suppress the cross-instance replay window. This implementation does not provide revocation.

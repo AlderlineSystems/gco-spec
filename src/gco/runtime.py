@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from gco.attestation import AttestationError, AttestationVerifier
+from gco.attestation import AttestationError, AttestationVerifier, ReplayCache
 from gco.derivation import AttestationAuthority, DelegationRequest, GCODerivationRuntime
 from gco.models import AccessMode, GCO
 from gco.state_store import GovernedStateStore, NamespaceAccessDenied, StateKeyNotFound, TaintedStateRead
@@ -27,7 +27,11 @@ class Decision:
 
 
 class GovernanceRuntime:
-    """Transport-agnostic enforcement seam for verified GCO authority."""
+    """Transport-agnostic enforcement seam for verified GCO authority.
+
+    ``expected_audience`` and ``replay_cache`` are forwarded to the constructed
+    verifier. Supplying a custom verifier leaves those policies to that verifier.
+    """
 
     def __init__(
         self,
@@ -38,10 +42,17 @@ class GovernanceRuntime:
         state_store: GovernedStateStore | None = None,
         attestation_authority: AttestationAuthority | None = None,
         now: Callable[[], datetime] | None = None,
+        expected_audience: str | list[str] | tuple[str, ...] | None = None,
+        replay_cache: ReplayCache | None = None,
     ) -> None:
         self._now = now or (lambda: datetime.now(timezone.utc))
         self.trust_bundle = trust_bundle
-        self.verifier = verifier or AttestationVerifier(trust_bundle, now=self._now)
+        self.verifier = verifier or AttestationVerifier(
+            trust_bundle,
+            now=self._now,
+            expected_audience=expected_audience,
+            replay_cache=replay_cache,
+        )
         self.validator = validator or GCOValidator(now=self._now)
         self.state_store = state_store or GovernedStateStore()
         self.attestation_authority = attestation_authority
@@ -109,24 +120,9 @@ class GovernanceRuntime:
             expiry = self._verify_subject_not_expired(subject)
             if expiry is not None:
                 return expiry
-            try:
-                requested_mode: Any = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
-            except (TypeError, ValueError):
-                requested_mode = mode
-            permission = next(
-                (permission for permission in subject.state_access_permissions if permission.namespace == namespace),
-                None,
-            )
-            if permission is None:
-                return self._deny(NamespaceAccessDenied, f"namespace {namespace} is not delegated")
-            requested_rank = _access_rank(requested_mode)
-            granted_rank = _access_rank(permission.access_mode)
-            requested_label = requested_mode.value if isinstance(requested_mode, AccessMode) else str(mode)
-            if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
-                return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
-            # This seam checks only the ACL grant; taint and per-key state are enforced by the store at real access time.
-            if not _access_allows(permission.access_mode, requested_mode):
-                return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
+            access = self._authorize_verified_state_access(subject, namespace, mode)
+            if not access.allowed:
+                return access
         except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._deny(DerivationError.GCO_MALFORMED, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -142,7 +138,7 @@ class GovernanceRuntime:
             expiry = self._verify_subject_not_expired(subject)
             if expiry is not None:
                 return expiry
-            access = self.authorize_state_access(subject, namespace, AccessMode.READ)
+            access = self._authorize_verified_state_access(subject, namespace, AccessMode.READ)
             if not access.allowed:
                 return access
             value = self.state_store.read(namespace, key, subject)
@@ -175,7 +171,7 @@ class GovernanceRuntime:
             requested_mode = self._coerce_write_mode(mode)
             if requested_mode is None:
                 return self._deny(NamespaceAccessDenied, f"{mode} denied for namespace {namespace}")
-            access = self.authorize_state_access(subject, namespace, requested_mode)
+            access = self._authorize_verified_state_access(subject, namespace, requested_mode)
             if not access.allowed:
                 return access
             write_subject = self._subject_for_write_mode(subject, namespace, requested_mode)
@@ -222,6 +218,26 @@ class GovernanceRuntime:
         if subject.expires_at <= self._now():
             return self._deny(DerivationError.EXPIRED)
         return None
+
+    def _authorize_verified_state_access(self, subject: GCO, namespace: str, mode: str | AccessMode) -> Decision:
+        try:
+            requested_mode: Any = mode if isinstance(mode, AccessMode) else AccessMode(str(mode))
+        except (TypeError, ValueError):
+            requested_mode = mode
+        permission = next(
+            (permission for permission in subject.state_access_permissions if permission.namespace == namespace),
+            None,
+        )
+        if permission is None:
+            return self._deny(NamespaceAccessDenied, f"namespace {namespace} is not delegated")
+        requested_rank = _access_rank(requested_mode)
+        granted_rank = _access_rank(permission.access_mode)
+        requested_label = requested_mode.value if isinstance(requested_mode, AccessMode) else str(mode)
+        if requested_rank is None or granted_rank is None or requested_mode is AccessMode.NONE:
+            return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
+        if not _access_allows(permission.access_mode, requested_mode):
+            return self._deny(NamespaceAccessDenied, f"{requested_label} denied for namespace {namespace}")
+        return Decision(allowed=True)
 
     def _coerce_write_mode(self, mode: str | AccessMode) -> AccessMode | None:
         try:

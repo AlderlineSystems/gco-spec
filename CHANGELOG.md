@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
   values.
 - Tightened runtime state access, append-only writes, expiry checks, JWT time
   claims, and derivation depth capping.
+- Added opt-in attestation audience verification and replay protection with a
+  bounded in-memory `ReplayCache` implementation.
 - Hardened derivation to share immutable-field definitions with validation and
   validate children before issuing attestations.
 - Added the SDK-agnostic P0 MCP adapter, `com.alderlinesystems.gco` extension

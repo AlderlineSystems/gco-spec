@@ -68,6 +68,20 @@ TAINT_RANK = {
     TaintPolicy.ISOLATED: 3,
 }
 
+IMMUTABLE_PARENT_FIELDS = (
+    "trace_id",
+    "policy_id",
+    "model_identity",
+    "intervention_version",
+)
+
+IMMUTABLE_FIELD_ERRORS = {
+    "trace_id": DerivationError.TRACE_ID_CHANGED,
+    "policy_id": DerivationError.POLICY_ID_CHANGED,
+    "model_identity": DerivationError.MODEL_IDENTITY_CHANGED,
+    "intervention_version": DerivationError.INTERVENTION_CHANGED,
+}
+
 
 def canonical_gco_hash(gco: GCO) -> str:
     payload = gco.model_dump(mode="json", exclude={"attestation"})
@@ -170,14 +184,9 @@ class GCOValidator:
             raise GCODerivationException(DerivationError.VERSION_MISMATCH)
 
     def _validate_immutables(self, parent: GCO, child: GCO) -> None:
-        if child.trace_id != parent.trace_id:
-            raise GCODerivationException(DerivationError.TRACE_ID_CHANGED)
-        if child.policy_id != parent.policy_id:
-            raise GCODerivationException(DerivationError.POLICY_ID_CHANGED)
-        if child.model_identity != parent.model_identity:
-            raise GCODerivationException(DerivationError.MODEL_IDENTITY_CHANGED)
-        if child.intervention_version != parent.intervention_version:
-            raise GCODerivationException(DerivationError.INTERVENTION_CHANGED)
+        for field_name in IMMUTABLE_PARENT_FIELDS:
+            if getattr(child, field_name) != getattr(parent, field_name):
+                raise GCODerivationException(IMMUTABLE_FIELD_ERRORS[field_name])
 
     def _validate_parent_linkage(self, parent: GCO, child: GCO) -> None:
         if child.parent_span_id != parent.span_id:

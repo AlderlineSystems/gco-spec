@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from gco.derivation import DelegationRequest, GCODerivationRuntime
 from gco.models import AccessMode, AttestationFormat, AttestationModel, StatePermission, TaintPolicy, ToolAuthority
-from gco.validator import DerivationError, GCODerivationException, GCOValidator
+from gco.validator import DerivationError, GCODerivationException, GCOValidator, IMMUTABLE_PARENT_FIELDS
 from conftest import BASE_TIME, make_root_gco
 
 
@@ -54,6 +54,13 @@ def test_derive_round_trips_through_validator(valid_root_gco):
     assert child.attestation.value == "issued-token"
     assert authority.calls[0][0] == valid_root_gco.model_identity
     assert "attestation" not in authority.calls[0][1]
+
+
+def test_derive_copies_shared_immutable_parent_fields(valid_root_gco):
+    child = GCODerivationRuntime(MockAttestationAuthority()).derive(valid_root_gco, _request())
+
+    for field_name in IMMUTABLE_PARENT_FIELDS:
+        assert getattr(child, field_name) == getattr(valid_root_gco, field_name)
 
 
 def test_derive_clamps_expiry(valid_root_gco):
@@ -165,14 +172,16 @@ def test_lineage_growth_to_128_and_rejection_at_129():
 
 
 def test_expired_parent_cannot_mint_valid_child(valid_root_gco):
+    authority = MockAttestationAuthority()
     expired_parent = valid_root_gco.model_copy(
         update={"expires_at": datetime(2000, 1, 1, tzinfo=timezone.utc)}
     )
 
     with pytest.raises(GCODerivationException) as exc_info:
-        GCODerivationRuntime(MockAttestationAuthority()).derive(expired_parent, _request())
+        GCODerivationRuntime(authority).derive(expired_parent, _request())
 
     assert exc_info.value.error is DerivationError.EXPIRED
+    assert authority.calls == []
 
 
 def test_delegation_request_rejects_non_utc_expiry():

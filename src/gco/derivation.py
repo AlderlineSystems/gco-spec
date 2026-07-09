@@ -6,11 +6,12 @@ from uuid import uuid4
 
 from pydantic import AwareDatetime, Field, field_validator
 
-from gco.models import AttestationModel, GCO, StatePermission, StrictBaseModel, ToolAuthority
+from gco.models import AttestationFormat, AttestationModel, GCO, StatePermission, StrictBaseModel, ToolAuthority
 from gco.validator import (
     DerivationError,
     GCODerivationException,
     GCOValidator,
+    IMMUTABLE_PARENT_FIELDS,
     _access_allows,
     _scope_is_subset,
     _taint_rank,
@@ -60,27 +61,27 @@ class GCODerivationRuntime:
 
         child_tools = self._derive_tools(parent, request)
         child_permissions = self._derive_permissions(parent, request)
+        immutable_values = {field_name: getattr(parent, field_name) for field_name in IMMUTABLE_PARENT_FIELDS}
         child_without_attestation = GCO(
             gco_version=parent.gco_version,
-            trace_id=parent.trace_id,
+            **immutable_values,
             span_id=uuid4(),
             parent_span_id=parent.span_id,
-            policy_id=parent.policy_id,
-            model_identity=parent.model_identity,
-            intervention_version=parent.intervention_version,
             tool_authority=child_tools,
             state_access_permissions=child_permissions,
             expires_at=min(request.requested_expiry, parent.expires_at),
             lineage=[*parent.lineage, canonical_gco_hash(parent)],
             attestation=None,
         )
+        child_for_validation = child_without_attestation.model_copy(
+            update={"attestation": AttestationModel(format=AttestationFormat.JWT_SVID, value="validation-placeholder")}
+        )
+        self.validator.validate(parent, child_for_validation)
         attestation = self.authority.issue(
             parent.model_identity,
             child_without_attestation.model_dump(mode="json", exclude={"attestation"}),
         )
-        child = child_without_attestation.model_copy(update={"attestation": attestation})
-        self.validator.validate(parent, child)
-        return child
+        return child_without_attestation.model_copy(update={"attestation": attestation})
 
     def _validate_no_duplicate_namespaces(self, permissions: list[StatePermission]) -> None:
         namespaces = [permission.namespace for permission in permissions]

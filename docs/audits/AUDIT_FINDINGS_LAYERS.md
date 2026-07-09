@@ -1,10 +1,14 @@
-# Adversarial Audit — `state_store.py` and `derivation.py`
+# Historical Audit — `state_store.py` and `derivation.py`
+
+> **HISTORICAL — ALL FINDINGS RESOLVED.** This report is archived for
+> engineering traceability. Its original failure language below is no longer
+> the current release posture; the audit harnesses still gate CI.
 
 **Date:** 2026-06-13 · **Mode:** audit findings below are historical; `state_store.py` blockers are now resolved (see resolution note) · **Method:** same as the validator audit (per-path reachability, independent attacks, ≥20k fuzz, round-trip property).
 
-> **Resolution note (state_store.py):** the three release-blocking findings — uncaught `KeyError` on missing-key `read`/`get_taint`, taint laundering via overwrite, and unknown-`taint_policy` failing open at the read gate — were fixed and independently re-verified. The fix: missing keys now raise a controlled `StateKeyNotFound(NamespaceAccessDenied)` instead of `KeyError`; write taint is monotonic high-water-mark (`stored = max(existing, writer)` by rank, reusing `validator._taint_rank` — no lattice duplication) so a once-tainted key stays quarantined through clean overwrites; and the read gate is rank-based, failing closed on unrankable values. A later fix also added per-read reader-vs-data taint alignment: a reader can only receive data whose stored taint rank is no higher than its own grant. Current status: the full pytest suite remains at 100% branch coverage; `audit_state_attacks.py` reports 0 holes, and `audit_state_fuzz.py` reports 20,000 iterations with 0 access / 0 taint / 0 laundering / 0 uncaught. **state_store.py verdict flips from NOT release-ready → release-ready.** The `derivation.py` low-severity flags (immutable-set duplication, attestation-minted-before-validate) remain open.
+> **Resolution note:** the three release-blocking `state_store.py` findings — uncaught `KeyError` on missing-key `read`/`get_taint`, taint laundering via overwrite, and unknown-`taint_policy` failing open at the read gate — were fixed and independently re-verified. The fix: missing keys now raise a controlled `StateKeyNotFound(NamespaceAccessDenied)` instead of `KeyError`; write taint is monotonic high-water-mark (`stored = max(existing, writer)` by rank, reusing `validator._taint_rank` — no lattice duplication) so a once-tainted key stays quarantined through clean overwrites; and the read gate is rank-based, failing closed on unrankable values. A later fix also added per-read reader-vs-data taint alignment: a reader can only receive data whose stored taint rank is no higher than its own grant. The two low-severity `derivation.py` flags were also fixed: validator equality checks and derivation copies now share `IMMUTABLE_PARENT_FIELDS`, and derivation validates the child before calling `authority.issue()`. Current status: the full pytest suite remains at 100% branch coverage; `audit_state_attacks.py` reports 0 holes, and `audit_state_fuzz.py` reports 20,000 iterations with 0 access / 0 taint / 0 laundering / 0 uncaught. **state_store.py verdict flips from NOT release-ready → release-ready; derivation.py low-severity flags are resolved.**
 
-**Reproduced build claim:** `73 passed`, **100% branch coverage**, nothing in `term-missing`. Confirmed. As with the validator, 100% branch coverage proves every *existing* branch ran; it does not prove the assertions encode the contract, and it cannot flag a missing check (e.g. a `KeyError` path that is a bare dict access, not a branch).
+**Reproduced build claim:** `246 passed`, **100% branch coverage**, nothing in `term-missing`. Confirmed. As with the validator, 100% branch coverage proves every *existing* branch ran; it does not prove the assertions encode the contract, and it cannot flag a missing check (e.g. a `KeyError` path that is a bare dict access, not a branch).
 
 Independent harnesses (repo root, **not** collected by pytest — `testpaths=["tests"]`):
 `audit_state_attacks.py`, `audit_state_fuzz.py`, `audit_derivation_roundtrip.py`.
@@ -17,11 +21,11 @@ Independent harnesses (repo root, **not** collected by pytest — `testpaths=["t
 
 | Reject reason | Code | Test | Assertion quality |
 |---|---|---|---|
-| namespace not delegated | `_permission_for` raise, [state_store.py:45](src/gco/state_store.py:45) | `test_write_rejects_missing_namespace` | type only (`NamespaceAccessDenied`) |
-| write denied (access ∉ {write,append}) | [:21-22](src/gco/state_store.py:21) | `test_write_rejects_none_access` | type only |
-| append denied (key exists) | [:24-25](src/gco/state_store.py:24) | `test_append_allows_new_key_and_rejects_existing_key` | type only |
-| read denied (access ∉ {read,write}) | [:31-32](src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
-| tainted read (taint ∈ {tainted,isolated}) | [:34-35](src/gco/state_store.py:34) | `test_read_rejects_tainted_state` | type (`TaintedStateRead`) — distinct from ACL ✓ |
+| namespace not delegated | `_permission_for` raise, [state_store.py:45](../../src/gco/state_store.py:45) | `test_write_rejects_missing_namespace` | type only (`NamespaceAccessDenied`) |
+| write denied (access ∉ {write,append}) | [:21-22](../../src/gco/state_store.py:21) | `test_write_rejects_none_access` | type only |
+| append denied (key exists) | [:24-25](../../src/gco/state_store.py:24) | `test_append_allows_new_key_and_rejects_existing_key` | type only |
+| read denied (access ∉ {read,write}) | [:31-32](../../src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
+| tainted read (taint ∈ {tainted,isolated}) | [:34-35](../../src/gco/state_store.py:34) | `test_read_rejects_tainted_state` | type (`TaintedStateRead`) — distinct from ACL ✓ |
 
 **Historical flags:**
 - **Taint-vs-ACL is distinguishable** (two exception classes) — good. **But the three ACL sub-reasons all collapse to `NamespaceAccessDenied`** with only the message differing, and **no test asserts the message**. A write rejected for the *wrong* ACL reason (e.g. "not delegated" when the test intends "append denied") passes. The task's exact concern.
@@ -74,13 +78,13 @@ Specific gaps, in severity order:
 
 | Refusal | Code | Test | Specific-code assert? |
 |---|---|---|---|
-| lineage flood (parent+1 > 128) | [derivation.py:46-47](src/gco/derivation.py:46) | `test_lineage_growth_to_128_and_rejection_at_129` | ✓ `LINEAGE_FLOODED` |
-| tool not in parent | [:79-80](src/gco/derivation.py:79) | `test_impossible_requests_rejected[0]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
-| depth exhausted (parent depth 0) | [:82-83](src/gco/derivation.py:82) | `test_depth_exhaustion_rejected` | ✓ `MAX_DEPTH_INCREASED` |
-| scope not subset | [:84-85](src/gco/derivation.py:84) | `test_impossible_requests_rejected[1]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
-| namespace not in parent | [:100-101](src/gco/derivation.py:100) | `test_impossible_requests_rejected[2]` | ✓ `STATE_PERMISSION_EXPANDED` |
-| access > parent / unknown access | [:104-105](src/gco/derivation.py:104) | `test_impossible_requests_rejected[3]` | ✓ `STATE_PERMISSION_EXPANDED` |
-| taint < parent / unknown taint | [:108-109](src/gco/derivation.py:108) | `test_impossible_requests_rejected[4]` | ✓ `TAINT_DOWNGRADED` |
+| lineage flood (parent+1 > 128) | [derivation.py:46-47](../../src/gco/derivation.py:46) | `test_lineage_growth_to_128_and_rejection_at_129` | ✓ `LINEAGE_FLOODED` |
+| tool not in parent | [:79-80](../../src/gco/derivation.py:79) | `test_impossible_requests_rejected[0]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
+| depth exhausted (parent depth 0) | [:82-83](../../src/gco/derivation.py:82) | `test_depth_exhaustion_rejected` | ✓ `MAX_DEPTH_INCREASED` |
+| scope not subset | [:84-85](../../src/gco/derivation.py:84) | `test_impossible_requests_rejected[1]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
+| namespace not in parent | [:100-101](../../src/gco/derivation.py:100) | `test_impossible_requests_rejected[2]` | ✓ `STATE_PERMISSION_EXPANDED` |
+| access > parent / unknown access | [:104-105](../../src/gco/derivation.py:104) | `test_impossible_requests_rejected[3]` | ✓ `STATE_PERMISSION_EXPANDED` |
+| taint < parent / unknown taint | [:108-109](../../src/gco/derivation.py:108) | `test_impossible_requests_rejected[4]` | ✓ `TAINT_DOWNGRADED` |
 | validate-stage (e.g. expired parent) | final `self.validator.validate` [:71] | `test_expired_parent_cannot_mint_valid_child` | ✓ `EXPIRED` |
 
 No refusal path asserts only "failure" — all pin the code. Better than the store.
@@ -100,15 +104,15 @@ RESULT: PASS
 
 ### (c) Lattice / immutable-set duplication
 
-- **Lattices and helpers are SHARED, not duplicated.** `derivation.py` imports `_access_rank`, `_taint_rank`, `_scope_is_subset`, `canonical_gco_hash` from `validator.py` ([derivation.py:10-18](src/gco/derivation.py:10)). `ACCESS_RANK`/`TAINT_RANK` exist only in the validator. ✓ No drift risk on the orderings.
-- **FLAG (LOW, drift):** the **immutable-field set is duplicated implicitly.** The validator enumerates it as equality checks (`gco_version` major, `trace_id`, `policy_id`, `model_identity`, `intervention_version`); `derive()` re-enumerates the same fields as constructor copies from the parent. Two literal lists, no shared constant. Same class as the schema/model taint drift found earlier. Currently low-risk because `DelegationRequest` cannot set any immutable field, but a newly-added immutable field would need synchronizing in both places with nothing enforcing it.
+- **Lattices and helpers are SHARED, not duplicated.** `derivation.py` imports `_access_rank`, `_taint_rank`, `_scope_is_subset`, `canonical_gco_hash` from `validator.py` ([derivation.py:10-18](../../src/gco/derivation.py:10)). `ACCESS_RANK`/`TAINT_RANK` exist only in the validator. ✓ No drift risk on the orderings.
+- **Resolved low-severity drift flag:** the immutable parent-field set is now shared as `IMMUTABLE_PARENT_FIELDS`; the validator uses it for equality checks and `derive()` uses it for constructor copies. `gco_version` major-version compatibility remains a separate validator check.
 
 ### (d) Independent linkage attack
 Probed directly across 20k random parents (varying lineage depth 0–3): could not drive the runtime to emit a child whose lineage fails to append the parent digest or whose `parent_span_id` mismatches. Both are guaranteed by construction and re-checked by the final `validate()`.
 
-### derivation.py verdict — **release-ready for the round-trip security property**, with two low-severity flags:
-- **(LOW, drift)** immutable-field set duplicated between validator equality checks and `derive()` constructor — should share one source of truth.
-- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. The runtime now passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
+### derivation.py verdict — **release-ready for the round-trip security property; low-severity flags resolved**
+- **Resolved drift flag:** immutable-field validation and derivation copies now share one source of truth.
+- **Resolved fail-first imperfection:** derivation now validates the child before calling `authority.issue()`, so a validate-stage rejection (e.g. expired parent) cannot mint a discarded attestation. Tool/permission expansions already failed before `issue()`. The runtime passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
 
 ---
 
@@ -117,20 +121,23 @@ Probed directly across 20k random parents (varying lineage depth 0–3): could n
 ```
 Name                     Stmts   Miss Branch BrPart  Cover   Missing
 --------------------------------------------------------------------
-src/gco/__init__.py          6      0      0      0   100%
+src/gco/__init__.py          9      0      0      0   100%
+src/gco/attestation.py     197      0     72      0   100%
 src/gco/der_harness.py      87      0     26      0   100%
-src/gco/derivation.py       64      0     20      0   100%
-src/gco/models.py           54      0      2      0   100%
-src/gco/state_store.py      34      0     12      0   100%
-src/gco/validator.py       149      0     48      0   100%
+src/gco/derivation.py       81      0     26      0   100%
+src/gco/models.py           74      0      6      0   100%
+src/gco/runtime.py         188      0     58      0   100%
+src/gco/state_store.py      64      0     28      0   100%
+src/gco/trust.py            67      0     12      0   100%
+src/gco/validator.py       161      0     48      0   100%
 --------------------------------------------------------------------
-TOTAL                      394      0    108      0   100%
-73 passed
+TOTAL                      928      0    276      0   100%
+246 passed
 ```
 No branch is missing. The historical state-store holes (KeyError, laundering, fail-open taint, alignment) all sat *under* 100% branch coverage: the KeyError was a bare dict access (no branch), and laundering/alignment were behaviors no test asserted.
 
 ## Per-file verdict
 - **`state_store.py`: RESOLVED → release-ready** (was NOT release-ready at audit time). The audit found uncaught `KeyError` (14/20k), taint laundering (4085/20k), unknown-taint fail-open, no reader alignment, plus test-quality gaps — fuzz then **FAILED** with 4099 violations. After the fixes (see resolution note at top), the state store denies missing keys cleanly, preserves taint monotonically, fails closed on unrankable taint, and enforces reader-vs-data taint alignment.
-- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). Two low-severity flags remain open: implicit immutable-set duplication and attestation-minted-before-validate; the earlier runtime clock-injection concern is resolved.
+- **`derivation.py`: release-ready for the core round-trip property** (20k iters: 0 disagreements, 0 expansion leaks, 0 uncaught, lineage/linkage intact; all refusal paths pin specific codes). The low-severity immutable-set duplication and attestation-minted-before-validate flags are resolved; the earlier runtime clock-injection concern is resolved.
 
-The state-store fix has landed; the two `derivation.py` low-severity flags are still open.
+The state-store fix has landed; the two `derivation.py` low-severity flags are resolved.

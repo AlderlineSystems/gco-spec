@@ -14,7 +14,7 @@ authors = [
     { name = "Alderline Systems" },
 ]
 maintainers = [
-    { name = "Sovereign Safety Labs", email = "ops@alderlinesystems.com" },
+    { name = "Alderline Systems", email = "ops@alderlinesystems.com" },
 ]
 keywords = ["gco", "governance", "attestation", "spiffe", "delegation"]
 classifiers = [

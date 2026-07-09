@@ -21,11 +21,11 @@ Independent harnesses (repo root, **not** collected by pytest — `testpaths=["t
 
 | Reject reason | Code | Test | Assertion quality |
 |---|---|---|---|
-| namespace not delegated | `_permission_for` raise, [state_store.py:45](src/gco/state_store.py:45) | `test_write_rejects_missing_namespace` | type only (`NamespaceAccessDenied`) |
-| write denied (access ∉ {write,append}) | [:21-22](src/gco/state_store.py:21) | `test_write_rejects_none_access` | type only |
-| append denied (key exists) | [:24-25](src/gco/state_store.py:24) | `test_append_allows_new_key_and_rejects_existing_key` | type only |
-| read denied (access ∉ {read,write}) | [:31-32](src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
-| tainted read (taint ∈ {tainted,isolated}) | [:34-35](src/gco/state_store.py:34) | `test_read_rejects_tainted_state` | type (`TaintedStateRead`) — distinct from ACL ✓ |
+| namespace not delegated | `_permission_for` raise, [state_store.py:45](../../src/gco/state_store.py:45) | `test_write_rejects_missing_namespace` | type only (`NamespaceAccessDenied`) |
+| write denied (access ∉ {write,append}) | [:21-22](../../src/gco/state_store.py:21) | `test_write_rejects_none_access` | type only |
+| append denied (key exists) | [:24-25](../../src/gco/state_store.py:24) | `test_append_allows_new_key_and_rejects_existing_key` | type only |
+| read denied (access ∉ {read,write}) | [:31-32](../../src/gco/state_store.py:31) | `test_read_rejects_none_access` | type only |
+| tainted read (taint ∈ {tainted,isolated}) | [:34-35](../../src/gco/state_store.py:34) | `test_read_rejects_tainted_state` | type (`TaintedStateRead`) — distinct from ACL ✓ |
 
 **Historical flags:**
 - **Taint-vs-ACL is distinguishable** (two exception classes) — good. **But the three ACL sub-reasons all collapse to `NamespaceAccessDenied`** with only the message differing, and **no test asserts the message**. A write rejected for the *wrong* ACL reason (e.g. "not delegated" when the test intends "append denied") passes. The task's exact concern.
@@ -78,13 +78,13 @@ Specific gaps, in severity order:
 
 | Refusal | Code | Test | Specific-code assert? |
 |---|---|---|---|
-| lineage flood (parent+1 > 128) | [derivation.py:46-47](src/gco/derivation.py:46) | `test_lineage_growth_to_128_and_rejection_at_129` | ✓ `LINEAGE_FLOODED` |
-| tool not in parent | [:79-80](src/gco/derivation.py:79) | `test_impossible_requests_rejected[0]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
-| depth exhausted (parent depth 0) | [:82-83](src/gco/derivation.py:82) | `test_depth_exhaustion_rejected` | ✓ `MAX_DEPTH_INCREASED` |
-| scope not subset | [:84-85](src/gco/derivation.py:84) | `test_impossible_requests_rejected[1]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
-| namespace not in parent | [:100-101](src/gco/derivation.py:100) | `test_impossible_requests_rejected[2]` | ✓ `STATE_PERMISSION_EXPANDED` |
-| access > parent / unknown access | [:104-105](src/gco/derivation.py:104) | `test_impossible_requests_rejected[3]` | ✓ `STATE_PERMISSION_EXPANDED` |
-| taint < parent / unknown taint | [:108-109](src/gco/derivation.py:108) | `test_impossible_requests_rejected[4]` | ✓ `TAINT_DOWNGRADED` |
+| lineage flood (parent+1 > 128) | [derivation.py:46-47](../../src/gco/derivation.py:46) | `test_lineage_growth_to_128_and_rejection_at_129` | ✓ `LINEAGE_FLOODED` |
+| tool not in parent | [:79-80](../../src/gco/derivation.py:79) | `test_impossible_requests_rejected[0]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
+| depth exhausted (parent depth 0) | [:82-83](../../src/gco/derivation.py:82) | `test_depth_exhaustion_rejected` | ✓ `MAX_DEPTH_INCREASED` |
+| scope not subset | [:84-85](../../src/gco/derivation.py:84) | `test_impossible_requests_rejected[1]` | ✓ `TOOL_AUTHORITY_EXPANDED` |
+| namespace not in parent | [:100-101](../../src/gco/derivation.py:100) | `test_impossible_requests_rejected[2]` | ✓ `STATE_PERMISSION_EXPANDED` |
+| access > parent / unknown access | [:104-105](../../src/gco/derivation.py:104) | `test_impossible_requests_rejected[3]` | ✓ `STATE_PERMISSION_EXPANDED` |
+| taint < parent / unknown taint | [:108-109](../../src/gco/derivation.py:108) | `test_impossible_requests_rejected[4]` | ✓ `TAINT_DOWNGRADED` |
 | validate-stage (e.g. expired parent) | final `self.validator.validate` [:71] | `test_expired_parent_cannot_mint_valid_child` | ✓ `EXPIRED` |
 
 No refusal path asserts only "failure" — all pin the code. Better than the store.
@@ -104,7 +104,7 @@ RESULT: PASS
 
 ### (c) Lattice / immutable-set duplication
 
-- **Lattices and helpers are SHARED, not duplicated.** `derivation.py` imports `_access_rank`, `_taint_rank`, `_scope_is_subset`, `canonical_gco_hash` from `validator.py` ([derivation.py:10-18](src/gco/derivation.py:10)). `ACCESS_RANK`/`TAINT_RANK` exist only in the validator. ✓ No drift risk on the orderings.
+- **Lattices and helpers are SHARED, not duplicated.** `derivation.py` imports `_access_rank`, `_taint_rank`, `_scope_is_subset`, `canonical_gco_hash` from `validator.py` ([derivation.py:10-18](../../src/gco/derivation.py:10)). `ACCESS_RANK`/`TAINT_RANK` exist only in the validator. ✓ No drift risk on the orderings.
 - **FLAG (LOW, drift):** the **immutable-field set is duplicated implicitly.** The validator enumerates it as equality checks (`gco_version` major, `trace_id`, `policy_id`, `model_identity`, `intervention_version`); `derive()` re-enumerates the same fields as constructor copies from the parent. Two literal lists, no shared constant. Same class as the schema/model taint drift found earlier. Currently low-risk because `DelegationRequest` cannot set any immutable field, but a newly-added immutable field would need synchronizing in both places with nothing enforcing it.
 
 ### (d) Independent linkage attack
@@ -112,7 +112,7 @@ Probed directly across 20k random parents (varying lineage depth 0–3): could n
 
 ### derivation.py verdict — **release-ready for the round-trip security property**, with two low-severity flags:
 - **(LOW, drift)** immutable-field set duplicated between validator equality checks and `derive()` constructor — should share one source of truth.
-- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. The runtime now passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
+- **(LOW, fail-first imperfection)** `authority.issue()` is called **before** the final `validate()` ([:66-71](../../src/gco/derivation.py:66)), so a validate-stage rejection (e.g. expired parent) mints an attestation it then discards. Tool/permission expansions correctly fail *before* `issue()`. Not a security hole (no child returned), but the expiry check should ideally precede minting. The runtime now passes its injected `GCOValidator` into derivation, so host-level derivation uses the same injected clock as the runtime seam.
 
 ---
 

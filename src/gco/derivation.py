@@ -81,7 +81,9 @@ class GCODerivationRuntime:
             parent.model_identity,
             child_without_attestation.model_dump(mode="json", exclude={"attestation"}),
         )
-        return child_without_attestation.model_copy(update={"attestation": attestation})
+        child = child_without_attestation.model_copy(update={"attestation": attestation})
+        self.validator.validate(parent, child)
+        return child
 
     def _validate_no_duplicate_namespaces(self, permissions: list[StatePermission]) -> None:
         namespaces = [permission.namespace for permission in permissions]

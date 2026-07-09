@@ -20,6 +20,11 @@ class MockAttestationAuthority:
         return AttestationModel(format=AttestationFormat.JWT_SVID, value="issued-token")
 
 
+class EmptyAttestationAuthority:
+    def issue(self, identity: str, gco_data: dict) -> AttestationModel:
+        return AttestationModel(format=AttestationFormat.JWT_SVID, value="")
+
+
 def _request(
     *,
     tools: list[ToolAuthority] | None = None,
@@ -182,6 +187,13 @@ def test_expired_parent_cannot_mint_valid_child(valid_root_gco):
 
     assert exc_info.value.error is DerivationError.EXPIRED
     assert authority.calls == []
+
+
+def test_derive_validates_issued_attestation_before_returning(valid_root_gco):
+    with pytest.raises(GCODerivationException) as exc_info:
+        GCODerivationRuntime(EmptyAttestationAuthority()).derive(valid_root_gco, _request())
+
+    assert exc_info.value.error is DerivationError.ATTESTATION_MISSING
 
 
 def test_delegation_request_rejects_non_utc_expiry():

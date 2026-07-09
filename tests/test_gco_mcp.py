@@ -164,6 +164,23 @@ def test_codec_round_trip_with_parent_and_handle():
     assert codec.extension_capability()["maxGcoBytes"] == 65_536
 
 
+def test_codec_attach_removes_stale_parent_when_parent_omitted():
+    key = _key()
+    root = _root(key)
+    runtime = _runtime(key)
+    child = runtime.derive_for_subcall(root, _host_to_a_delegation()).child
+    assert child is not None
+    grandchild = runtime.derive_for_subcall(child, _delegation(B_TOOL, "read:table")).child
+    assert grandchild is not None
+    codec = GcoWireCodec()
+
+    stale_parent_meta = codec.attach(_meta(), child, parent=root)
+    next_meta = codec.attach(stale_parent_meta, grandchild)
+
+    assert META_GCO in next_meta
+    assert META_PARENT_GCO not in next_meta
+
+
 def test_codec_rejects_missing_malformed_oversize_and_bad_handle():
     key = _key()
     root = _root(key)
@@ -292,6 +309,13 @@ def test_e2_server_boundary_allow_deny_optional_and_parent_validation_paths():
         {"io.modelcontextprotocol/clientCapabilities": {"extensions": client_extensions_block()}},
         tool_uri=A_TOOL,
     )
+    optional_bad_payload = GovernedServerBoundary(runtime, codec, require=False).authorize_incoming(
+        {
+            "io.modelcontextprotocol/clientCapabilities": {"extensions": client_extensions_block()},
+            META_GCO: {"not": "a gco"},
+        },
+        tool_uri=A_TOOL,
+    )
     none_meta = server.authorize_incoming(None, tool_uri=A_TOOL)
 
     assert allowed.allowed is True
@@ -301,7 +325,10 @@ def test_e2_server_boundary_allow_deny_optional_and_parent_validation_paths():
     assert parent_denied.allowed is False
     assert none_meta.error_code is GcoMcpError.MISSING_CAPABILITY
     assert optional_missing_cap.allowed is True
-    assert optional_malformed.allowed is True
+    assert optional_malformed.allowed is False
+    assert optional_malformed.error_code is GcoMcpError.MISSING_GCO
+    assert optional_bad_payload.allowed is False
+    assert optional_bad_payload.error_code is GcoMcpError.MALFORMED_GCO
 
 
 def test_e2_tampered_meta_denied_by_attestation():

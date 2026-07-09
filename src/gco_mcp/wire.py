@@ -42,6 +42,8 @@ class GcoWireCodec:
             parent_payload = self._dump_gco(parent)
             self._enforce_size(parent_payload)
             next_meta[META_PARENT_GCO] = parent_payload
+        else:
+            next_meta.pop(META_PARENT_GCO, None)
         return next_meta
 
     def extract(self, meta: Mapping[str, Any] | None) -> WireGco:

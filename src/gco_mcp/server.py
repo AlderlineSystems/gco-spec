@@ -36,9 +36,7 @@ class GovernedServerBoundary:
         try:
             wire = self.codec.extract(meta)
         except WireError as exc:
-            if self.require:
-                return denial_decision(exc.error_code, str(exc))
-            return Decision(allowed=True)
+            return denial_decision(exc.error_code, str(exc))
         if wire.parent is not None:
             subcall = self.runtime.authorize_subcall(wire.parent, wire.gco)
             if not subcall.allowed:

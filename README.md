@@ -144,6 +144,7 @@ gco --json derive tmp/gco-cli/parent.json \
   --request tmp/gco-cli/request.json \
   --trust-bundle tmp/gco-cli/bundle.json \
   --sign-key tmp/gco-cli/signing-key.pem \
+  --kid example-key \
   > tmp/gco-cli/derived.json
 
 python - <<'PY'

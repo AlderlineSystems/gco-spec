@@ -25,7 +25,8 @@ made externally fetchable.
 6. `src/gco/attestation.py` verifies supported attestations against those bundles.
 7. `src/gco/runtime.py` composes verification, validation, derivation, and state access behind `Decision`-returning authorization methods.
 8. `src/gco/der_harness.py` implements the paper's Differential Evaluation under Recursion (DER) / governance-coverage scoring proposal for pre-recorded recursive transcripts. It is instrumentation, not an attack generator.
-9. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores are deferred until the MCP 2026-07-28 spec finalizes. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
+9. `src/gco/cli.py` exposes the `gco` console script for adopter debugging of trust bundles and GCO chains.
+10. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores are deferred until the MCP 2026-07-28 spec finalizes. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
 
 ## Usage quickstart
 
@@ -83,6 +84,86 @@ python examples/demo_authority_escape.py
 It shows a delegated child attempting to widen `read summarize` authority into
 `admin delete`: naive ungoverned delegation would allow the request, while
 `GovernanceRuntime.authorize_subcall()` denies it.
+
+## CLI debugging
+
+Installing the package exposes a stdlib-`argparse` console script named `gco`:
+
+```bash
+python -m pip install -e ".[test]"
+gco --help
+```
+
+The CLI is intended for adopter debugging of trust bundles and GCO chains. It is
+a thin shell over `GCOValidator`, `AttestationVerifier`, `TrustBundle`, and
+`GovernanceRuntime`; failures fail closed with a stable error code and a
+non-zero exit status. Put `--json` before the subcommand for machine-readable
+output.
+
+To create local CLI fixtures from the checked example support code:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+import jwt
+from cryptography.hazmat.primitives import serialization
+
+from examples._support import (
+    make_private_key,
+    root_gco,
+    sign,
+    valid_delegation_request,
+)
+
+out = Path("tmp/gco-cli")
+out.mkdir(parents=True, exist_ok=True)
+key = make_private_key()
+parent = sign(root_gco(), key)
+request = valid_delegation_request()
+jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+jwk.update({"kid": "example-key", "alg": "RS256", "use": "sig"})
+
+(out / "parent.json").write_text(json.dumps(parent.model_dump(mode="json"), indent=2), encoding="utf-8")
+(out / "request.json").write_text(json.dumps(request.model_dump(mode="json"), indent=2), encoding="utf-8")
+(out / "bundle.json").write_text(json.dumps({"example.org": {"jwks": {"keys": [jwk]}}}, indent=2), encoding="utf-8")
+(out / "signing-key.pem").write_bytes(
+    key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+)
+PY
+```
+
+Mint a signed tightened child, then validate, verify, and inspect it:
+
+```bash
+gco --json derive tmp/gco-cli/parent.json \
+  --request tmp/gco-cli/request.json \
+  --trust-bundle tmp/gco-cli/bundle.json \
+  --sign-key tmp/gco-cli/signing-key.pem \
+  --kid example-key \
+  > tmp/gco-cli/derived.json
+
+python - <<'PY'
+import json
+from pathlib import Path
+payload = json.loads(Path("tmp/gco-cli/derived.json").read_text(encoding="utf-8"))
+Path("tmp/gco-cli/child.json").write_text(json.dumps(payload["child"], indent=2), encoding="utf-8")
+PY
+
+gco validate tmp/gco-cli/child.json --parent tmp/gco-cli/parent.json
+gco verify tmp/gco-cli/child.json --trust-bundle tmp/gco-cli/bundle.json
+gco inspect tmp/gco-cli/child.json
+```
+
+`gco derive` without `--sign-key` emits a tightened child with a placeholder
+attestation and `"preview_only": true`; that unsigned output is for previewing
+the narrowed authority only and is not cryptographically trusted. `gco schema`
+prints the bundled JSON Schema path and content.
 
 ## Development
 

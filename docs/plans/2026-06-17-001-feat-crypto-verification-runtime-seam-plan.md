@@ -22,7 +22,7 @@ Two sequenced milestones that moved GCO from *advisory* (structurally validates 
 2. **Milestone 2 — Runtime enforcement seam.** A transport-agnostic `GovernanceRuntime` composes verifier + validator + derivation + state store into `Decision`-returning chokepoint methods a host calls when a node spawns a sub-call, invokes a tool, or accesses governed state. It verifies authenticity first, then structural tightening, then resource authority — fail closed at each step.
 
 MCP propagation and a CLI were explicitly out of scope for this seam milestone;
-the follow-up P0 MCP adapter now lives in `src/gco_mcp/`.
+follow-up implementations now live in `src/gco_mcp/` and `src/gco/cli.py`.
 
 ---
 
@@ -250,7 +250,8 @@ The per-unit `**Files:**` sections are authoritative; the tree is the expected s
 
 ### Deferred to Follow-Up Work
 - **MCP propagation** — a later adapter that wraps `GovernanceRuntime` at the MCP tool-call boundary (derive a child GCO per sub-call, attach + verify). Depends on this seam. Follow-up status: the P0 adapter now lives in `src/gco_mcp/`.
-- **CLI** — a `gco verify/validate/derive` command surface. Independent usability layer; build only when an external consumer needs it.
+- **CLI** — follow-up status: the `gco` console script now provides `validate`,
+  `verify`, `inspect`, `derive`, and `schema` debugging commands.
 - **`raw-jws` verification** — if not in the first cut, it remains `UNSUPPORTED_FORMAT` until scoped.
 - **`tpm-quote` verification** — requires TPM quote/PCR attestation machinery; out of this milestone's identity model.
 - **SPIRE / workload-API trust source** — can back the `TrustBundle` interface later without changing the verifier.

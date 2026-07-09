@@ -78,7 +78,7 @@ class InMemoryReplayCache:
             if jti in self._entries:
                 return False
             if len(self._entries) >= self._max_entries:
-                self._evict_oldest()
+                return False
             self._entries[jti] = expires_at
             return True
 
@@ -87,13 +87,6 @@ class InMemoryReplayCache:
             if expires_at <= now:
                 del self._entries[jti]
 
-    def _evict_oldest(self) -> None:
-        if not self._entries:
-            return
-        oldest = min(self._entries, key=self._entries.__getitem__)
-        del self._entries[oldest]
-
-
 class AttestationVerifier:
     """Verify GCO-bound JWT-SVID and X.509-SVID attestations."""
 
@@ -101,7 +94,7 @@ class AttestationVerifier:
         self,
         trust_bundle: TrustBundle,
         now: Callable[[], datetime] | None = None,
-        expected_audience: str | tuple[str, ...] | None = None,
+        expected_audience: str | list[str] | tuple[str, ...] | None = None,
         replay_cache: ReplayCache | None = None,
     ) -> None:
         self._trust_bundle = trust_bundle
@@ -210,12 +203,16 @@ def _failure(error: AttestationError, message: str) -> VerificationResult:
     return VerificationResult(verified=False, error_code=error, message=message)
 
 
-def _coerce_expected_audience(value: str | tuple[str, ...] | None) -> tuple[str, ...] | None:
+def _coerce_expected_audience(value: Any) -> tuple[str, ...] | None:
     if value is None:
         return None
     if isinstance(value, str):
+        if not value:
+            raise ValueError("expected_audience must not be empty")
         return (value,)
-    return tuple(value)
+    if isinstance(value, (list, tuple)) and value and all(isinstance(item, str) and item for item in value):
+        return tuple(value)
+    raise ValueError("expected_audience must be a non-empty string or tuple/list of strings")
 
 
 def _trust_domain(spiffe_id: Any) -> str | None:

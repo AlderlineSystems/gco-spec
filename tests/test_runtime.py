@@ -702,6 +702,37 @@ def test_read_state_and_write_state_round_trip():
     assert read.value == b"42"
 
 
+def test_state_read_and_write_do_not_reverify_replay_protected_attestation():
+    key = _key()
+    store = GovernedStateStore()
+    writer_subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[
+                StatePermission(namespace="memory", access_mode=AccessMode.WRITE, taint_policy=TaintPolicy.SANITIZED)
+            ]
+        )
+    )
+    reader_subject = _with_identity(
+        make_root_gco(
+            state_access_permissions=[
+                StatePermission(namespace="memory", access_mode=AccessMode.READ, taint_policy=TaintPolicy.SANITIZED)
+            ]
+        )
+    )
+    writer = _sign(writer_subject, key, claims=_claims(writer_subject, jti="write-1"))
+    reader = _sign(reader_subject, key, claims=_claims(reader_subject, jti="read-1"))
+    store._values[("memory", "answer")] = b"42"
+    store._taints[("memory", "answer")] = TaintPolicy.SANITIZED
+    runtime = GovernanceRuntime(_bundle(key), state_store=store, now=lambda: NOW, replay_cache=InMemoryReplayCache())
+
+    written = runtime.write_state(writer, "memory", "other", b"84")
+    read = runtime.read_state(reader, "memory", "answer")
+
+    assert written == Decision(allowed=True)
+    assert read.allowed is True
+    assert read.value == b"42"
+
+
 def test_write_state_append_mode_allows_new_key_and_denies_overwrite():
     key = _key()
     store = GovernedStateStore()

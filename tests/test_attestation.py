@@ -370,6 +370,14 @@ def test_jwt_svid_expected_audience_accepts_string_or_list(valid_root_gco):
     assert verifier.verify(list_aud, gco, now=VERIFY_TIME).verified is True
 
 
+@pytest.mark.parametrize("expected_audience", ["", [], ["ok", ""], [123], {"aud": "x"}])
+def test_jwt_svid_rejects_malformed_direct_expected_audience(expected_audience):
+    key = _rsa_key()
+
+    with pytest.raises(ValueError):
+        AttestationVerifier(_trust_bundle_for_jwt(key), expected_audience=expected_audience)
+
+
 @pytest.mark.parametrize("aud", [None, "https://other.example/receiver", [], [123]])
 def test_jwt_svid_expected_audience_rejects_missing_wrong_or_malformed_audience(aud, valid_root_gco):
     gco = _with_identity(valid_root_gco)
@@ -440,17 +448,15 @@ def test_jwt_svid_missing_jti_rejected_when_replay_cache_enabled(valid_root_gco)
     assert result.error_code is AttestationError.JTI_MISSING
 
 
-def test_in_memory_replay_cache_expires_entries_and_evicts_oldest():
+def test_in_memory_replay_cache_expires_entries_and_fails_closed_when_full():
     cache = InMemoryReplayCache(max_entries=1)
     expires = VERIFY_TIME + timedelta(seconds=10)
 
     assert cache.check_and_record("seen", expires, VERIFY_TIME) is True
     assert cache.check_and_record("seen", expires, VERIFY_TIME) is False
     assert cache.check_and_record("seen", expires, expires) is True
-    assert cache.check_and_record("newer", expires + timedelta(seconds=1), VERIFY_TIME) is True
-    assert cache.check_and_record("seen", expires, VERIFY_TIME) is True
-    cache._entries.clear()
-    cache._evict_oldest()
+    assert cache.check_and_record("newer", expires + timedelta(seconds=1), VERIFY_TIME) is False
+    assert cache.check_and_record("seen", expires, VERIFY_TIME) is False
 
 
 def test_in_memory_replay_cache_rejects_non_positive_max_entries():

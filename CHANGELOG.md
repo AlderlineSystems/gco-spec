@@ -23,3 +23,5 @@ All notable changes to this project will be documented in this file.
   claims, and derivation depth capping.
 - Hardened derivation to share immutable-field definitions with validation and
   validate children before issuing attestations.
+- Added the SDK-agnostic P0 MCP adapter, `com.alderlinesystems.gco` extension
+  profile, and MCP boundary audit harness.

@@ -21,7 +21,8 @@ Two sequenced milestones that moved GCO from *advisory* (structurally validates 
 1. **Milestone 1 — Attestation crypto verification.** A standalone `AttestationVerifier` establishes an attestation's *authenticity* (signature, key trust, identity binding, digest binding, expiry) against an offline trust bundle, for `jwt-svid` and `x509-svid`. `raw-jws` and `tpm-quote` fail closed as explicitly unverified.
 2. **Milestone 2 — Runtime enforcement seam.** A transport-agnostic `GovernanceRuntime` composes verifier + validator + derivation + state store into `Decision`-returning chokepoint methods a host calls when a node spawns a sub-call, invokes a tool, or accesses governed state. It verifies authenticity first, then structural tightening, then resource authority — fail closed at each step.
 
-MCP propagation and a CLI are explicitly out of scope (later adapters on top of this seam).
+MCP propagation and a CLI were explicitly out of scope for this seam milestone;
+the follow-up P0 MCP adapter now lives in `src/gco_mcp/`.
 
 ---
 
@@ -50,7 +51,7 @@ GCO's whole job is keeping authority from silently widening as computation branc
 - **KTD3 — Unify verified formats around JWS; bind to the canonical hash.** `jwt-svid` is a JWT compact token; `x509-svid` is verified as a JWS whose `x5c` header carries the leaf+intermediates, with the chain path-validated against the bundle CAs and the SPIFFE ID read from the leaf cert's URI SAN. Verified formats bind the GCO via a `gco_hash` claim equal to `canonical_gco_hash(gco)`. `raw-jws` remains declared but unsupported until a dedicated verifier is scoped. Rationale: one verification path for the implemented formats, reuses the existing canonical hash, avoids changing `AttestationModel` fields.
 - **KTD4 — Use vetted libraries; never hand-roll signature verification.** X.509 path validation uses `cryptography`'s `x509.verification`. JWS/JWT signature verification uses `PyJWT` as a runtime dependency. Rationale: crypto correctness is the entire point of this milestone.
 - **KTD5 — Unsupported formats fail closed, loudly.** `tpm-quote` (and `raw-jws` if not in the first cut) return `UNSUPPORTED_FORMAT` with `verified=False`. Rationale: honesty — "we do not verify this" must never read as "verified."
-- **KTD6 — The seam is transport-agnostic and returns `Decision`s; the host enforces.** No MCP/HTTP/transport coupling. Composition order is fixed: authenticity → structural tightening → resource authority, fail closed at each. Rationale: MCP propagation becomes a thin later adapter; matches `positioning.md`'s "depends on deployment controls to be enforcing."
+- **KTD6 — The seam is transport-agnostic and returns `Decision`s; the host enforces.** No MCP/HTTP/transport coupling. Composition order is fixed: authenticity → structural tightening → resource authority, fail closed at each. Rationale: MCP propagation stays a thin adapter; matches `positioning.md`'s "depends on deployment controls to be enforcing."
 - **KTD7 — Injected clock, mirroring the validator.** The verifier and seam take a `now` callable (default `datetime.now(timezone.utc)`) so attestation-expiry is deterministically testable, exactly as `GCOValidator` already does.
 
 ---
@@ -248,7 +249,7 @@ The per-unit `**Files:**` sections are authoritative; the tree is the expected s
 **In scope:** offline-trust-bundle verification of `jwt-svid` + `x509-svid`; a transport-agnostic enforcement seam composing the verified layers; fuzz harnesses; honest docs.
 
 ### Deferred to Follow-Up Work
-- **MCP propagation** — a later adapter that wraps `GovernanceRuntime` at the MCP tool-call boundary (derive a child GCO per sub-call, attach + verify). Depends on this seam.
+- **MCP propagation** — a later adapter that wraps `GovernanceRuntime` at the MCP tool-call boundary (derive a child GCO per sub-call, attach + verify). Depends on this seam. Follow-up status: the P0 adapter now lives in `src/gco_mcp/`.
 - **CLI** — a `gco verify/validate/derive` command surface. Independent usability layer; build only when an external consumer needs it.
 - **`raw-jws` verification** — if not in the first cut, it remains `UNSUPPORTED_FORMAT` until scoped.
 - **`tpm-quote` verification** — requires TPM quote/PCR attestation machinery; out of this milestone's identity model.

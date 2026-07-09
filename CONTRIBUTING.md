@@ -6,7 +6,7 @@ Thank you for considering a contribution to `gco-spec`.
 
 ```bash
 python -m pip install -e ".[test]"
-pytest --cov=src/gco --cov-branch --cov-report=term-missing -q
+pytest --cov=src/gco --cov=src/gco_mcp --cov-branch --cov-report=term-missing -q
 ```
 
 The repository currently supports Python 3.11 and newer. Keep changes focused,

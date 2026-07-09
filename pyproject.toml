@@ -56,6 +56,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 gco = ["py.typed"]
+gco_mcp = ["py.typed"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -63,7 +64,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["src/gco"]
+source = ["src/gco", "src/gco_mcp"]
 
 [tool.coverage.report]
 fail_under = 100

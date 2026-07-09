@@ -30,7 +30,7 @@ jobs:
           python -m pip install build
 
       - name: Run tests with coverage
-        run: pytest --cov=src/gco --cov-branch --cov-report=term-missing -q
+        run: pytest --cov=src/gco --cov=src/gco_mcp --cov-branch --cov-report=term-missing -q
 
       - name: Run audit harnesses
         run: |
@@ -55,6 +55,8 @@ jobs:
               names = set(wheel.namelist())
           if not any(name.endswith("schemas/gco_schema_v1.json") for name in names):
               raise SystemExit("schemas/gco_schema_v1.json missing from wheel")
+          if not any(name.startswith("gco_mcp/") for name in names):
+              raise SystemExit("gco_mcp package missing from wheel")
           print(f"verified schema in {wheels[0]}")
           sys.exit(0)
           PY

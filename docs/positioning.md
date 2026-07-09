@@ -33,10 +33,11 @@ is not a content-rule problem. It is an authority- and flow-scope problem.
 
 GCO addresses the structural side: as computation spreads across a recursion or
 tool-call tree (including MCP tool servers, which carry none of the root's
-in-forward-pass governance by default), GCO is the layer that keeps authority
-from silently escaping. It is weak as a standalone product - it governs nothing
-by itself; it is a primitive that a runtime enforces - and useful precisely as
-the missing layer beneath content-level monitors.
+in-forward-pass governance by default; `src/gco_mcp/` supplies the P0 adapter
+for carrying attested GCOs through MCP `tools/call` `_meta`), GCO is the layer
+that keeps authority from silently escaping. It is weak as a standalone product
+- it governs nothing by itself; it is a primitive that a runtime enforces - and
+useful precisely as the missing layer beneath content-level monitors.
 
 ### What GCO does NOT do
 

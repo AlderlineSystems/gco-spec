@@ -27,7 +27,11 @@ class Decision:
 
 
 class GovernanceRuntime:
-    """Transport-agnostic enforcement seam for verified GCO authority."""
+    """Transport-agnostic enforcement seam for verified GCO authority.
+
+    ``expected_audience`` and ``replay_cache`` are forwarded to the constructed
+    verifier. Supplying a custom verifier leaves those policies to that verifier.
+    """
 
     def __init__(
         self,

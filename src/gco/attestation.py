@@ -88,7 +88,12 @@ class InMemoryReplayCache:
                 del self._entries[jti]
 
 class AttestationVerifier:
-    """Verify GCO-bound JWT-SVID and X.509-SVID attestations."""
+    """Verify GCO-bound JWT-SVID and X.509-SVID attestations.
+
+    ``expected_audience`` enables fail-closed ``aud`` verification, overriding
+    trust-bundle metadata when set. ``replay_cache`` enables fail-closed ``jti``
+    replay checks using the cache's atomic check-and-record operation.
+    """
 
     def __init__(
         self,

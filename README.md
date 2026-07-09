@@ -209,6 +209,21 @@ Trust bundles may be loaded from a mapping or JSON file shaped as either
 production verifiers, set an expected audience either on the verifier/runtime or
 as top-level trust-bundle metadata:
 `{"expected_audience": "https://receiver.example/endpoint", "trust_domains": {...}}`.
+Replay protection is opt-in through a `ReplayCache` implementation:
+
+```python
+from gco import GovernanceRuntime, InMemoryReplayCache
+
+runtime = GovernanceRuntime(
+    bundle,
+    expected_audience="https://receiver.example/endpoint",
+    replay_cache=InMemoryReplayCache(),
+)
+```
+
+With replay protection enabled, attestations must carry a non-empty `jti`.
+The bundled cache is per process; use a shared/state-synchronized cache for
+multi-instance deployments or keep attestation TTLs short.
 
 ## Security enforcement
 

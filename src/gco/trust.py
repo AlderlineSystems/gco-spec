@@ -33,7 +33,11 @@ class TrustDomainBundle:
 
 @dataclass(frozen=True)
 class TrustBundle:
-    """Offline trust configuration keyed by SPIFFE trust domain."""
+    """Offline trust configuration keyed by SPIFFE trust domain.
+
+    ``expected_audience`` is optional verifier metadata; when present, the
+    default verifier/runtime requires matching attestation ``aud`` claims.
+    """
 
     domains: Mapping[str, TrustDomainBundle]
     expected_audience: tuple[str, ...] | None = None

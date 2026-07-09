@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - Added Apache-2.0 license metadata and public governance documents.
+- Added GitHub issue templates, pull request template, CODEOWNERS, Dependabot,
+  and security reporting contact link.
 - Added GitHub Actions CI for Python test, coverage, audit, and wheel checks.
 - Added runnable quickstart and authority-escape demo examples, with pytest
   coverage so they stay executable.

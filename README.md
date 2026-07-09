@@ -19,7 +19,7 @@ made externally fetchable.
 
 1. `src/gco/models.py` defines the strict Pydantic data model.
 2. `src/gco/validator.py` validates child GCOs against parent GCOs. The existing `validate()` API returns `True` or raises `GCODerivationException`; `validate_result()` returns a `ValidationResult(valid=False, error_code=...)` for callers that prefer non-throwing fail-closed handling, including malformed raw payloads via `GCO_MALFORMED`. Tool depth may only shrink: a child can request a lower `max_depth`, but never more than the parent's remaining depth.
-3. `src/gco/derivation.py` mints tightened child GCOs from delegation requests. Requested tool depth is capped to the parent's remaining depth, and `attestation_identity` overrides are rejected; children are attested for the parent's `model_identity`.
+3. `src/gco/derivation.py` mints tightened child GCOs from delegation requests. Requested tool depth is capped to the parent's remaining depth, immutable parent fields are copied from the shared validator field set, and `attestation_identity` overrides are rejected; children are validated before attestation and attested for the parent's `model_identity`.
 4. `src/gco/state_store.py` enforces namespace ACLs and taint labels.
 5. `src/gco/trust.py` loads offline trust bundles for SPIFFE trust domains.
 6. `src/gco/attestation.py` verifies supported attestations against those bundles.

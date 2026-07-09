@@ -21,3 +21,5 @@ All notable changes to this project will be documented in this file.
   values.
 - Tightened runtime state access, append-only writes, expiry checks, JWT time
   claims, and derivation depth capping.
+- Hardened derivation to share immutable-field definitions with validation and
+  validate children before issuing attestations.

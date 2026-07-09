@@ -6,9 +6,15 @@ All notable changes to this project will be documented in this file.
 
 - Added Apache-2.0 license metadata and public governance documents.
 - Added GitHub Actions CI for Python test, coverage, audit, and wheel checks.
+- Added runnable quickstart and authority-escape demo examples, with pytest
+  coverage so they stay executable.
 - Included the canonical JSON Schema in built wheel artifacts.
-- Clarified public-readiness notes for the stable schema namespace and
-  `SSL-TS-2026-001` spec status.
+- Clarified public-readiness notes for the stable schema namespace and the
+  separately published Recursion Blindspot position paper.
+- Reframed the repository as the reference implementation of the GCO concept,
+  with the bundled JSON Schema as the implementation-facing contract.
+- Moved historical audit reports under `docs/audits/` with resolved-status
+  banners.
 - Moved the JSON Schema namespace and maintainer metadata under Alderline
   Systems branding.
 - Accepted generic URI identities in the model and schema for SPIFFE and URN

@@ -1,4 +1,8 @@
-# Adversarial Audit — `state_store.py` and `derivation.py`
+# Historical Audit — `state_store.py` and `derivation.py`
+
+> **HISTORICAL — ALL FINDINGS RESOLVED.** This report is archived for
+> engineering traceability. Its original failure language below is no longer
+> the current release posture; the audit harnesses still gate CI.
 
 **Date:** 2026-06-13 · **Mode:** audit findings below are historical; `state_store.py` blockers are now resolved (see resolution note) · **Method:** same as the validator audit (per-path reachability, independent attacks, ≥20k fuzz, round-trip property).
 

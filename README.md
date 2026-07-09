@@ -1,11 +1,14 @@
 # GCO Reference Implementation
 
-Reference Python implementation for the Alderline Systems SSL-TS-2026-001 GCO derivation contract.
+Governance scoped to a single model forward pass does not automatically cover
+recursive or delegated computation. A Governance Context Object (GCO) is the
+authority-propagation primitive that travels with the call tree: each child
+context must be attested, linked to its parent, and no broader than the authority
+it inherited.
 
-`SSL-TS-2026-001` is referenced as the governing technical specification for
-this reference implementation. No public normative spec URL is included in this
-repository yet; until one is published, treat this package and the bundled
-schema as the implementation-facing reference material.
+This repository is the reference Python implementation of the GCO concept from
+the position paper **"The Recursion Blindspot."** The bundled JSON Schema is the
+implementation-facing contract for serialized GCOs.
 
 The schema identifier
 `https://alderlinesystems.com/schemas/gco_schema_v1.json` is the JSON Schema
@@ -21,7 +24,64 @@ made externally fetchable.
 5. `src/gco/trust.py` loads offline trust bundles for SPIFFE trust domains.
 6. `src/gco/attestation.py` verifies supported attestations against those bundles.
 7. `src/gco/runtime.py` composes verification, validation, derivation, and state access behind `Decision`-returning authorization methods.
-8. `src/gco/der_harness.py` scores pre-recorded recursive transcripts.
+8. `src/gco/der_harness.py` implements the paper's Differential Evaluation under Recursion (DER) / governance-coverage scoring proposal for pre-recorded recursive transcripts. It is instrumentation, not an attack generator.
+
+## Usage quickstart
+
+Run the checked example:
+
+```bash
+python examples/quickstart.py
+```
+
+The example loads a `TrustBundle`, constructs `GovernanceRuntime`, derives and
+authorizes a delegated sub-call, and authorizes a scoped tool call:
+
+```python
+from gco.runtime import GovernanceRuntime
+
+from examples._support import (
+    NOW,
+    TOOL_URI,
+    SigningAuthority,
+    make_private_key,
+    root_gco,
+    sign,
+    trust_bundle_for,
+    valid_delegation_request,
+)
+
+key = make_private_key()
+bundle = trust_bundle_for(key)
+runtime = GovernanceRuntime(bundle, attestation_authority=SigningAuthority(key), now=lambda: NOW)
+
+parent = sign(root_gco(), key)
+derived = runtime.derive_for_subcall(parent, valid_delegation_request())
+child = derived.child
+
+subcall = runtime.authorize_subcall(parent, child)
+tool_call = runtime.authorize_tool_call(child, TOOL_URI, requested_scope="read")
+
+print(subcall)
+print(tool_call)
+```
+
+Expected decisions:
+
+```text
+Decision(allowed=True, ...)
+Decision(allowed=True, ...)
+```
+
+For the authority-escape contrast, run:
+
+```bash
+python examples/demo_authority_escape.py
+```
+
+It shows a delegated child attempting to widen `read summarize` authority into
+`admin delete`: naive ungoverned delegation would allow the request, while
+`GovernanceRuntime.authorize_subcall()` denies it.
 
 ## Development
 
@@ -39,13 +99,11 @@ SPIFFE IDs and URNs, rather than only HTTP(S) URLs.
 
 This repository is prepared for public open-source review, but some release
 operations remain maintainer-owned: publishing the schema namespace URL,
-publishing or linking the normative `SSL-TS-2026-001` document, and changing
-repository visibility.
+publishing the updated position paper, and changing repository visibility.
 
-Historical audit reports in `AUDIT_FINDINGS.md` and
-`AUDIT_FINDINGS_LAYERS.md` document previously found issues and include
-resolution notes at the top. The current validation posture is represented by
-the pytest coverage gate and the root-level `audit_*.py` harnesses.
+Historical audit reports live in `docs/audits/`; all listed findings are
+resolved, and the current validation posture is represented by the pytest
+coverage gate and the root-level `audit_*.py` harnesses.
 
 ## Taint Handling
 

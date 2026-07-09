@@ -1,4 +1,8 @@
-# Adversarial Audit — `src/gco/validator.py`
+# Historical Audit — `src/gco/validator.py`
+
+> **HISTORICAL — ALL FINDINGS RESOLVED.** This report is archived for
+> engineering traceability. Its original failure language below is no longer
+> the current release posture; the audit harnesses still gate CI.
 
 **Date:** 2026-06-13 · **Scope:** validator security logic + test suite quality · **Mode:** historical audit.
 
@@ -101,7 +105,7 @@ No branch appears in `term-missing`. **This is exactly the trap:** 100% branch c
 - **`der_harness.py`** imports no model/LLM client (only `gco.models.GCO`), takes its judge as an injected `Callable`, and does static transcript scoring with no recursive-input or prompt generation. **Boundary clean.** ✓
 - **Tightening logic location.** All authority/lineage/expiry/attestation tightening lives in `validator.py` (and is re-applied in `derivation.py` for minting). It was **not** smuggled into Pydantic model validators — `models.py` contains only a UTC-format check on `expires_at`. ✓
 - **`models.py` ↔ `schemas/gco_schema_v1.json` round-trip.** `test_schema.py:19` validates the example through both and asserts a dump→validate→dump round-trip equality, and would fail on divergence of the *example*. **Gap:** it only exercises a fully-populated example. Schema marks `taint_policy` **required**; `models.py:50` gives it a default (`TaintPolicy.CLEAN`). A model-valid GCO that omits `taint_policy` would be **schema-invalid**, and the round-trip test would not catch it. Minor, but a real drift the test cannot see.
-- **Attestation contract drift (security-relevant).** Spec requires `format ∈ {jwt-svid, x509-svid, raw-jws, tpm-quote}`. Implementation (`models.py:11-14` and the JSON schema) defines `{jwt-svid, dsse, cose}`. Consequences: (i) spec-legitimate attestations (`x509-svid`, `raw-jws`, `tpm-quote`) are **rejected**; (ii) formats the spec never sanctioned (`dsse`, `cose`) are **accepted**. The implementation is internally consistent (models == schema) but **diverges from the SSL-TS-2026-001 contract**.
+- **Attestation contract drift (security-relevant).** The intended contract requires `format ∈ {jwt-svid, x509-svid, raw-jws, tpm-quote}`. Implementation (`models.py:11-14` and the JSON schema) defines `{jwt-svid, dsse, cose}`. Consequences: (i) contract-legitimate attestations (`x509-svid`, `raw-jws`, `tpm-quote`) are **rejected**; (ii) formats the contract never sanctioned (`dsse`, `cose`) are **accepted**. The implementation is internally consistent (models == schema) but **diverges from the intended implementation contract**.
 - **Attestation honesty.** The code does presence + enum-membership only and does **not** claim or imply signature verification; README explicitly scopes crypto verification as not implemented. **Honestly scoped.** ✓
 
 ---

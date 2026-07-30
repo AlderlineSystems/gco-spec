@@ -16,9 +16,7 @@ concurrency:
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
-    # This job only needs the Python toolchain; keep private-repository Actions
-    # spend low enough that the checks remain runnable under the account budget.
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:

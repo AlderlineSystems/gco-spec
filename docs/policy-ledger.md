@@ -32,6 +32,9 @@ active = ledger.active_policies()               # policy_id -> latest active rec
 as_of = ledger.active_policies(at=some_utc_time)
 ```
 
+As-of replay applies qualifying events in `recorded_at` order; append sequence
+and `event_id` provide deterministic tie-breakers for equal timestamps.
+
 ### Wire points
 
 Hosts should call the ledger when a deployment control plane changes the policy

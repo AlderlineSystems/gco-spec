@@ -95,11 +95,13 @@ python -m pip install -e ".[test]"
 gco --help
 ```
 
-The CLI is intended for adopter debugging of trust bundles and GCO chains. It is
-a thin shell over `GCOValidator`, `AttestationVerifier`, `TrustBundle`, and
-`GovernanceRuntime`; failures fail closed with a stable error code and a
+The CLI is intended for adopter debugging of trust bundles and GCO chains, and
+for recording, inspecting, and verifying policy deployment ledgers. The GCO
+commands are thin shells over `GCOValidator`, `AttestationVerifier`,
+`TrustBundle`, and `GovernanceRuntime`; ledger commands delegate to
+`PolicyDeploymentLedger`. Failures fail closed with a stable error code and a
 non-zero exit status. Put `--json` before the subcommand for machine-readable
-output.
+output. See `docs/policy-ledger.md` for ledger usage and v1 limits.
 
 To create local CLI fixtures from the checked example support code:
 

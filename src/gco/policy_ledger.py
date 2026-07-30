@@ -174,6 +174,7 @@ class PolicyDeploymentLedger:
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._id_factory = id_factory or (lambda: str(uuid.uuid4()))
         self._entries: list[PolicyActivationRecord] = []
+        self._usable = True
         if self._path is not None and self._path.exists():
             self._load_jsonl(self._path)
             if verify_on_load:
@@ -184,13 +185,16 @@ class PolicyDeploymentLedger:
         return self._path
 
     def __len__(self) -> int:
+        self._ensure_usable()
         return len(self._entries)
 
     def entries(self) -> tuple[PolicyActivationRecord, ...]:
+        self._ensure_usable()
         return tuple(self._entries)
 
     def head_hash(self) -> str | None:
         """Hash of the latest entry, or ``None`` when the ledger is empty."""
+        self._ensure_usable()
         if not self._entries:
             return None
         return self._entries[-1].entry_hash
@@ -209,6 +213,7 @@ class PolicyDeploymentLedger:
         event_id: str | None = None,
     ) -> PolicyActivationRecord:
         """Append one activation lifecycle event and return the sealed record."""
+        self._ensure_usable()
         if not isinstance(event_type, ActivationEventType):
             try:
                 event_type = ActivationEventType(event_type)
@@ -291,6 +296,7 @@ class PolicyDeploymentLedger:
 
     def verify(self, *, expected_head: str | None = None) -> None:
         """Validate sequence numbers and the hash chain; optionally pin the head hash."""
+        self._ensure_usable()
         prev = GENESIS_PREV_HASH
         for index, record in enumerate(self._entries):
             if record.sequence != index:
@@ -323,22 +329,28 @@ class PolicyDeploymentLedger:
 
         When ``at`` is set, only events with ``recorded_at <= at`` are applied.
         """
+        self._ensure_usable()
         if at is not None:
             if at.tzinfo is None or at.utcoffset() is None:
                 raise ValueError("at must be timezone-aware UTC")
             at_utc = at.astimezone(timezone.utc)
-            filtered = (r for r in self._entries if r.recorded_at <= at_utc)
+            filtered = sorted(
+                (r for r in self._entries if r.recorded_at <= at_utc),
+                key=lambda r: (r.recorded_at, r.sequence, r.event_id),
+            )
             return _active_snapshot(filtered)
         return _active_snapshot(self._entries)
 
     def latest_for_policy(self, policy_id: str) -> PolicyActivationRecord | None:
         """Most recent event for ``policy_id``, or ``None`` if never recorded."""
+        self._ensure_usable()
         for record in reversed(self._entries):
             if record.policy_id == policy_id:
                 return record
         return None
 
     def to_jsonl_lines(self) -> list[str]:
+        self._ensure_usable()
         return [
             json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
             for record in self._entries
@@ -346,6 +358,7 @@ class PolicyDeploymentLedger:
 
     def export_jsonl(self, path: str | Path) -> None:
         """Write the full chain to ``path`` (overwrite). Prefer the append path for live use."""
+        self._ensure_usable()
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = "\n".join(self.to_jsonl_lines())
@@ -366,14 +379,25 @@ class PolicyDeploymentLedger:
         return cls(path=path, now=now, id_factory=id_factory, verify_on_load=verify)
 
     def _append(self, record: PolicyActivationRecord) -> None:
+        self._ensure_usable()
         if self._path is not None:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            line = json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-            with self._path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                line = json.dumps(
+                    record.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+                )
+                with self._path.open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as exc:
+                self._usable = False
+                raise LedgerAppendError(f"failed to append ledger entry: {exc}") from exc
         self._entries.append(record)
+
+    def _ensure_usable(self) -> None:
+        if not self._usable:
+            raise LedgerAppendError("ledger is unusable after a previous append storage failure")
 
     def _load_jsonl(self, path: Path) -> None:
         text = path.read_text(encoding="utf-8")

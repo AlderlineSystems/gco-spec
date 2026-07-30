@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import make_root_gco
+import gco.policy_ledger as policy_ledger_module
 from gco.policy_ledger import (
     GENESIS_PREV_HASH,
     ActivationEventType,
@@ -126,6 +127,46 @@ def test_active_policies_rejects_naive_at():
     ledger = _ledger()
     with pytest.raises(ValueError, match="timezone-aware"):
         ledger.active_policies(at=datetime(2099, 1, 1))
+
+
+def test_active_policies_at_replays_by_recorded_time():
+    ledger = _ledger()
+    older = FIXED_NOW
+    newer = FIXED_NOW + timedelta(hours=1)
+
+    ledger.record_activation(
+        policy_id="p",
+        intervention_version="v2",
+        event_id="newer",
+        recorded_at=newer,
+    )
+    ledger.record_activation(
+        policy_id="p",
+        intervention_version="v1",
+        event_id="older",
+        recorded_at=older,
+    )
+
+    active = ledger.active_policies(at=newer)
+
+    assert active["p"].intervention_version == "v2"
+
+
+def test_append_storage_failure_marks_ledger_unusable(tmp_path: Path, monkeypatch):
+    path = tmp_path / "ledger.jsonl"
+    ledger = _ledger(path=path)
+
+    def fail_fsync(_file_descriptor: int) -> None:
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr(policy_ledger_module.os, "fsync", fail_fsync)
+
+    with pytest.raises(LedgerAppendError, match="failed to append ledger entry"):
+        ledger.record_activation(policy_id="p", intervention_version="v1")
+    with pytest.raises(LedgerAppendError, match="unusable"):
+        ledger.record_activation(policy_id="p", intervention_version="v2")
+    with pytest.raises(LedgerAppendError, match="unusable"):
+        ledger.active_policies()
 
 
 def test_verify_detects_mutated_entry():

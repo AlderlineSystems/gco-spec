@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Added a tamper-evident append-only policy/deployment activation ledger
+  (`PolicyDeploymentLedger`) with SHA-256 hash chaining, JSONL persistence,
+  active-policy replay helpers, CLI `ledger-record` / `ledger-show` /
+  `ledger-verify` commands, and docs in `docs/policy-ledger.md`. v1 is
+  single-writer accountability storage; it does not replace TrustBundle / GCO
+  crypto or provide multi-tenant control-plane consensus.
 - Added Apache-2.0 license metadata and public governance documents.
 - Added GitHub issue templates, pull request template, CODEOWNERS, Dependabot,
   and security reporting contact link.

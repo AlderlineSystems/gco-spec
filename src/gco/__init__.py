@@ -12,6 +12,16 @@ from gco.models import (
     TaintPolicy,
     ToolAuthority,
 )
+from gco.policy_ledger import (
+    GENESIS_PREV_HASH,
+    ActivationEventType,
+    LedgerAppendError,
+    LedgerError,
+    LedgerIntegrityError,
+    PolicyActivationRecord,
+    PolicyDeploymentLedger,
+    compute_entry_hash,
+)
 from gco.runtime import Decision, GovernanceRuntime
 from gco.state_store import GovernedStateStore, NamespaceAccessDenied, TaintedStateRead
 from gco.trust import TrustBundle, TrustBundleError
@@ -19,11 +29,13 @@ from gco.validator import DerivationError, GCODerivationException, GCOValidator,
 
 __all__ = [
     "AccessMode",
+    "ActivationEventType",
     "AttestationError",
     "AttestationAuthority",
     "AttestationFormat",
     "AttestationModel",
     "AttestationVerifier",
+    "compute_entry_hash",
     "DERHarness",
     "Decision",
     "DelegationRequest",
@@ -32,10 +44,16 @@ __all__ = [
     "GCODerivationException",
     "GCODerivationRuntime",
     "GCOValidator",
+    "GENESIS_PREV_HASH",
     "GovernanceRuntime",
     "GovernedStateStore",
     "InMemoryReplayCache",
+    "LedgerAppendError",
+    "LedgerError",
+    "LedgerIntegrityError",
     "NamespaceAccessDenied",
+    "PolicyActivationRecord",
+    "PolicyDeploymentLedger",
     "ReplayCache",
     "RecursiveTranscript",
     "StatePermission",

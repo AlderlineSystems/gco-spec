@@ -15,6 +15,13 @@ from pydantic import ValidationError
 from gco.attestation import AttestationError, AttestationVerifier, VerificationResult
 from gco.derivation import DelegationRequest, GCODerivationRuntime
 from gco.models import AttestationFormat, AttestationModel, GCO
+from gco.policy_ledger import (
+    ActivationEventType,
+    LedgerAppendError,
+    LedgerError,
+    LedgerIntegrityError,
+    PolicyDeploymentLedger,
+)
 from gco.runtime import GovernanceRuntime
 from gco.trust import TrustBundle, TrustBundleError
 from gco.validator import DerivationError, GCOValidator, canonical_gco_hash
@@ -101,6 +108,42 @@ def _build_parser() -> argparse.ArgumentParser:
 
     schema = subcommands.add_parser("schema", help="print the bundled JSON schema path and content")
     schema.set_defaults(func=_cmd_schema)
+
+    ledger_verify = subcommands.add_parser(
+        "ledger-verify",
+        help="verify the hash chain of a policy deployment ledger (JSONL)",
+    )
+    ledger_verify.add_argument("ledger", help="path to JSONL policy deployment ledger")
+    ledger_verify.add_argument(
+        "--expected-head",
+        default=None,
+        help="optional externally sealed head hash that must match",
+    )
+    ledger_verify.set_defaults(func=_cmd_ledger_verify)
+
+    ledger_show = subcommands.add_parser(
+        "ledger-show",
+        help="list entries and active policies from a policy deployment ledger",
+    )
+    ledger_show.add_argument("ledger", help="path to JSONL policy deployment ledger")
+    ledger_show.set_defaults(func=_cmd_ledger_show)
+
+    ledger_record = subcommands.add_parser(
+        "ledger-record",
+        help="append a policy activation event to a JSONL deployment ledger",
+    )
+    ledger_record.add_argument("ledger", help="path to JSONL policy deployment ledger")
+    ledger_record.add_argument("--policy-id", required=True)
+    ledger_record.add_argument("--intervention-version", required=True)
+    ledger_record.add_argument(
+        "--event-type",
+        default=ActivationEventType.ACTIVATE.value,
+        choices=[item.value for item in ActivationEventType],
+    )
+    ledger_record.add_argument("--deployment-id", default=None)
+    ledger_record.add_argument("--actor", default=None)
+    ledger_record.add_argument("--reason", default=None)
+    ledger_record.set_defaults(func=_cmd_ledger_record)
     return parser
 
 
@@ -178,6 +221,111 @@ def _cmd_schema(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int
     payload = {"path": str(path), "schema": schema}
     _emit_success(payload, args.json, stdout, human=f"Schema path: {path}\n{json.dumps(schema, indent=2, sort_keys=True)}")
     return SUCCESS
+
+
+def _cmd_ledger_verify(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int:
+    ledger = _load_policy_ledger(args.ledger)
+    try:
+        ledger.verify(expected_head=args.expected_head)
+    except LedgerIntegrityError as exc:
+        raise CLIError("LEDGER_INTEGRITY_ERROR", str(exc)) from exc
+    payload = {
+        "entries": len(ledger),
+        "head_hash": ledger.head_hash(),
+        "verified": True,
+    }
+    human = f"allow: ledger verified\nentries: {payload['entries']}\nhead_hash: {payload['head_hash']}"
+    _emit_success(payload, args.json, stdout, human=human)
+    return SUCCESS
+
+
+def _cmd_ledger_show(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int:
+    ledger = _load_policy_ledger(args.ledger)
+    try:
+        ledger.verify()
+    except LedgerIntegrityError as exc:
+        raise CLIError("LEDGER_INTEGRITY_ERROR", str(exc)) from exc
+    entries = [record.model_dump(mode="json") for record in ledger.entries()]
+    active = {
+        policy_id: record.model_dump(mode="json")
+        for policy_id, record in ledger.active_policies().items()
+    }
+    payload = {
+        "active_policies": active,
+        "entries": entries,
+        "head_hash": ledger.head_hash(),
+    }
+    if args.json:
+        _emit_success(payload, True, stdout, human="")
+        return SUCCESS
+    lines = [
+        f"entries: {len(entries)}",
+        f"head_hash: {payload['head_hash']}",
+        "active policies:",
+    ]
+    if not active:
+        lines.append("  (none)")
+    else:
+        for policy_id, record in sorted(active.items()):
+            lines.append(
+                f"  - {policy_id} intervention={record['intervention_version']} "
+                f"event={record['event_type']} seq={record['sequence']}"
+            )
+    lines.append("history:")
+    if not entries:
+        lines.append("  (empty)")
+    else:
+        for record in entries:
+            lines.append(
+                f"  - [{record['sequence']}] {record['event_type']} "
+                f"{record['policy_id']}@{record['intervention_version']} "
+                f"hash={record['entry_hash'][:12]}…"
+            )
+    _emit_success(payload, False, stdout, human="\n".join(lines))
+    return SUCCESS
+
+
+def _cmd_ledger_record(args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> int:
+    path = Path(args.ledger)
+    try:
+        ledger = PolicyDeploymentLedger(path=path)
+        record = ledger.record_activation(
+            policy_id=args.policy_id,
+            intervention_version=args.intervention_version,
+            event_type=args.event_type,
+            deployment_id=args.deployment_id,
+            actor=args.actor,
+            reason=args.reason,
+        )
+    except (LedgerAppendError, LedgerIntegrityError, LedgerError) as exc:
+        code = (
+            "LEDGER_INTEGRITY_ERROR"
+            if isinstance(exc, LedgerIntegrityError)
+            else "LEDGER_APPEND_ERROR"
+        )
+        raise CLIError(code, str(exc)) from exc
+    payload = {"head_hash": ledger.head_hash(), "record": record.model_dump(mode="json")}
+    human = (
+        f"recorded: {record.event_type.value} {record.policy_id}@"
+        f"{record.intervention_version} seq={record.sequence}\n"
+        f"entry_hash: {record.entry_hash}\nhead_hash: {ledger.head_hash()}"
+    )
+    _emit_success(payload, args.json, stdout, human=human)
+    return SUCCESS
+
+
+def _load_policy_ledger(path: str | Path) -> PolicyDeploymentLedger:
+    ledger_path = Path(path)
+    if not ledger_path.exists():
+        raise CLIError("LEDGER_NOT_FOUND", f"{path}: ledger file not found")
+    try:
+        # Defer chain verification to callers so they can attach expected_head
+        # and emit a single integrity error path.
+        return PolicyDeploymentLedger.from_jsonl(ledger_path, verify=False)
+    except LedgerIntegrityError as exc:
+        raise CLIError("LEDGER_INTEGRITY_ERROR", str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise CLIError("LEDGER_MALFORMED", str(exc)) from exc
 
 
 def _load_json(path: str | Path) -> Any:

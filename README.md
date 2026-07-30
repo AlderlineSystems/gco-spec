@@ -25,8 +25,9 @@ made externally fetchable.
 6. `src/gco/attestation.py` verifies supported attestations against those bundles.
 7. `src/gco/runtime.py` composes verification, validation, derivation, and state access behind `Decision`-returning authorization methods.
 8. `src/gco/der_harness.py` implements the paper's Differential Evaluation under Recursion (DER) / governance-coverage scoring proposal for pre-recorded recursive transcripts. It is instrumentation, not an attack generator.
-9. `src/gco/cli.py` exposes the `gco` console script for adopter debugging of trust bundles and GCO chains.
-10. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores are deferred until the MCP 2026-07-28 spec finalizes. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
+9. `src/gco/cli.py` exposes the `gco` console script for adopter debugging of trust bundles and GCO chains, plus policy deployment ledger inspect/record/verify helpers.
+10. `src/gco/policy_ledger.py` provides a tamper-evident, append-only policy/deployment activation ledger (hash-chained JSONL or in-memory) for accountability of which `policy_id` / `intervention_version` values were active when. See `docs/policy-ledger.md`.
+11. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores are deferred until the MCP 2026-07-28 spec finalizes. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
 
 ## Usage quickstart
 

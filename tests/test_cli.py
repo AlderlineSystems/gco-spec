@@ -426,6 +426,132 @@ def test_helper_codes_cover_public_shapes():
     }
 
 
+def test_ledger_record_show_and_verify(tmp_path, capsys):
+    path = tmp_path / "deployments.jsonl"
+
+    status = cli.main(
+        [
+            "--json",
+            "ledger-record",
+            str(path),
+            "--policy-id",
+            "policy-alpha",
+            "--intervention-version",
+            "v1",
+            "--actor",
+            "ops@example",
+            "--reason",
+            "rollout",
+        ]
+    )
+    recorded = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert recorded["ok"] is True
+    assert recorded["record"]["policy_id"] == "policy-alpha"
+    head = recorded["head_hash"]
+
+    status = cli.main(["--json", "ledger-verify", str(path), "--expected-head", head])
+    verified = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert verified == {"entries": 1, "head_hash": head, "ok": True, "verified": True}
+
+    status = cli.main(["ledger-show", str(path)])
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "policy-alpha" in captured.out
+    assert "entries: 1" in captured.out
+
+    status = cli.main(["--json", "ledger-show", str(path)])
+    shown = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert shown["ok"] is True
+    assert shown["head_hash"] == head
+    assert "policy-alpha" in shown["active_policies"]
+
+
+def test_ledger_verify_missing_and_integrity_errors(tmp_path, capsys):
+    missing = tmp_path / "missing.jsonl"
+    status = cli.main(["--json", "ledger-verify", str(missing)])
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_NOT_FOUND"
+
+    path = tmp_path / "bad.jsonl"
+    path.write_text("{not-json\n", encoding="utf-8")
+    status = cli.main(["--json", "ledger-verify", str(path)])
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_INTEGRITY_ERROR"
+
+    good = tmp_path / "good.jsonl"
+    assert cli.main(["ledger-record", str(good), "--policy-id", "p", "--intervention-version", "1"]) == 0
+    capsys.readouterr()
+    status = cli.main(["--json", "ledger-verify", str(good), "--expected-head", "0" * 64])
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_INTEGRITY_ERROR"
+
+
+def test_ledger_show_empty_and_record_validation(tmp_path, capsys):
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("", encoding="utf-8")
+    status = cli.main(["ledger-show", str(empty)])
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "entries: 0" in captured.out
+    assert "(none)" in captured.out
+    assert "(empty)" in captured.out
+
+    path = tmp_path / "ledger.jsonl"
+    status = cli.main(
+        ["--json", "ledger-record", str(path), "--policy-id", "", "--intervention-version", "1"]
+    )
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_APPEND_ERROR"
+
+
+def test_ledger_show_reports_integrity_failure(tmp_path, capsys):
+    path = tmp_path / "tampered.jsonl"
+    assert (
+        cli.main(
+            [
+                "ledger-record",
+                str(path),
+                "--policy-id",
+                "p",
+                "--intervention-version",
+                "1",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    payload = json.loads(path.read_text(encoding="utf-8").strip())
+    payload["policy_id"] = "evil"
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    status = cli.main(["--json", "ledger-show", str(path)])
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_INTEGRITY_ERROR"
+
+
+def test_ledger_load_malformed_non_integrity_error(tmp_path, capsys, monkeypatch):
+    path = tmp_path / "ledger.jsonl"
+    path.write_text("", encoding="utf-8")
+
+    def boom(_path, **_kwargs):
+        raise RuntimeError("disk exploded")
+
+    monkeypatch.setattr(cli.PolicyDeploymentLedger, "from_jsonl", boom)
+    status = cli.main(["--json", "ledger-verify", str(path)])
+    output = json.loads(capsys.readouterr().out)
+    assert status == 1
+    assert output["error_code"] == "LEDGER_MALFORMED"
+    assert "disk exploded" in output["message"]
+
+
 def test_format_inspection_handles_no_taint_or_attestation(valid_root_gco):
     gco = valid_root_gco.model_copy(update={"state_access_permissions": [], "attestation": None})
     payload = cli._inspection_payload(gco)

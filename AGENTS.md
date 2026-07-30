@@ -9,3 +9,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - The P0 MCP adapter lives in `src/gco_mcp/` and is intentionally SDK-agnostic: plain `_meta` dicts in/out, no MCP SDK dependency, and GCO material only under reverse-DNS `_meta` keys. Do not add GCO fields to tool `inputSchema`.
 - Adapter enforcement must compose `GovernanceRuntime` for authorization, derivation, attestation verification, and parent-child tightening. Do not reimplement crypto or GCO tightening logic in `gco_mcp`.
 - Tasks lifecycle glue, handle-store resolution, and SEP publication are deferred until the MCP 2026-07-28 spec finalizes.
+- Policy/deployment activation history lives in `src/gco/policy_ledger.py` (`PolicyDeploymentLedger`): append-only hash-chained events for `policy_id` / `intervention_version`. Hosts record activations at the deploy boundary; do not fold this into `GovernanceRuntime` authorization. See `docs/policy-ledger.md` for integrity limits (tamper-evident, not multi-writer consensus).
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

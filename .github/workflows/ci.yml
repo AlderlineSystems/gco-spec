@@ -16,7 +16,9 @@ concurrency:
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # This job only needs the Python toolchain; keep private-repository Actions
+    # spend low enough that the checks remain runnable under the account budget.
+    runs-on: ubuntu-slim
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +39,7 @@ jobs:
           python -m pip install build
 
       - name: Run tests with coverage
-        run: pytest --cov=src/gco --cov=src/gco_mcp --cov-branch --cov-report=term-missing -q
+        run: python -m pytest --cov=src/gco --cov=src/gco_mcp --cov-branch --cov-report=term-missing -q
 
       - name: Run audit harnesses
         run: |

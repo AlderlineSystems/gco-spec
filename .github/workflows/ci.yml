@@ -16,7 +16,8 @@ concurrency:
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # Keep private-repository Actions usage within the account's runner budget.
+    runs-on: ubuntu-slim
     strategy:
       fail-fast: false
       matrix:

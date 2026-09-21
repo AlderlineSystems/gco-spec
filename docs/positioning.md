@@ -28,7 +28,7 @@ Per-action monitors share a known blind spot, which their own authors tend to
 name as a roadmap item: **individually-benign steps that compose into harm
 across a sequence or across nodes.** Read a file, encode it, send it - each
 step passes the content check; the composition is the attack. That is the
-aggregation problem described in the recursion-blindspot position paper, and it
+aggregation problem described in the [recursion-blindspot position paper](../recursion-blindspot-v5.md), and it
 is not a content-rule problem. It is an authority- and flow-scope problem.
 
 GCO addresses the structural side: as computation spreads across a recursion or

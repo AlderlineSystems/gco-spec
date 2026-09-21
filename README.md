@@ -1,5 +1,9 @@
 # GCO Reference Implementation
 
+[![CI](https://img.shields.io/github/actions/workflow/status/SSBrouhard/gco-spec/ci.yml?branch=main&label=CI)](https://github.com/SSBrouhard/gco-spec/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 Governance scoped to a single model forward pass does not automatically cover
 recursive or delegated computation. A Governance Context Object (GCO) is the
 authority-propagation primitive that travels with the call tree: each child
@@ -7,13 +11,13 @@ context must be attested, linked to its parent, and no broader than the authorit
 it inherited.
 
 This repository is the reference Python implementation of the GCO concept from
-the position paper **"The Recursion Blindspot."** The bundled JSON Schema is the
+the position paper **"The Recursion Blindspot"**
+([v5](recursion-blindspot-v5.md)). The bundled JSON Schema is the
 implementation-facing contract for serialized GCOs.
 
 The schema identifier
-`https://alderlinesystems.com/schemas/gco_schema_v1.json` is the JSON Schema
-namespace. The URL should be hosted or resolved separately when the namespace is
-made externally fetchable.
+`https://alderlinesystems.com/schemas/gco_schema_v1.json` is hosted and
+matches pin `89bf058`.
 
 ## Components
 
@@ -27,7 +31,7 @@ made externally fetchable.
 8. `src/gco/der_harness.py` implements the paper's Differential Evaluation under Recursion (DER) / governance-coverage scoring proposal for pre-recorded recursive transcripts. It is instrumentation, not an attack generator.
 9. `src/gco/cli.py` exposes the `gco` console script for adopter debugging of trust bundles and GCO chains, plus policy deployment ledger inspect/record/verify helpers.
 10. `src/gco/policy_ledger.py` provides a tamper-evident, append-only policy/deployment activation ledger (hash-chained JSONL or in-memory) for accountability of which `policy_id` / `intervention_version` values were active when. See `docs/policy-ledger.md`.
-11. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores are deferred until the MCP 2026-07-28 spec finalizes. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
+11. `src/gco_mcp/` provides the P0 MCP adapter for carrying attested GCOs in `tools/call` `_meta` fields. It is SDK-agnostic dict-in/dict-out glue over `GovernanceRuntime`; tasks lifecycle handling and handle stores remain out of P0 even though the MCP 2026-07-28 specification is final. See `docs/mcp-extension-com.alderlinesystems.gco.md`.
 
 ## Usage quickstart
 
@@ -182,9 +186,11 @@ SPIFFE IDs and URNs, rather than only HTTP(S) URLs.
 
 ## Project status
 
-This repository is prepared for public open-source review, but some release
-operations remain maintainer-owned: publishing the schema namespace URL,
-publishing the updated position paper, and changing repository visibility.
+The position paper this package implements is
+[`recursion-blindspot-v5.md`](recursion-blindspot-v5.md) (v5; v3 is not current).
+The schema namespace URL is hosted at
+`https://alderlinesystems.com/schemas/gco_schema_v1.json` and matches pin
+`89bf058`.
 
 Historical audit reports live in `docs/audits/`; all listed findings are
 resolved, and the current validation posture is represented by the pytest

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Added the v5 Recursion Blindspot position paper as the canonical in-repo
+  paper (`recursion-blindspot-v5.md`) and linked it from the README.
+- Documented that the schema namespace URL is hosted and matches pin `89bf058`.
+- Added README status badges for Apache-2.0, GitHub Actions CI, and Python 3.11+.
 - Added a tamper-evident append-only policy/deployment activation ledger
   (`PolicyDeploymentLedger`) with SHA-256 hash chaining, JSONL persistence,
   active-policy replay helpers, CLI `ledger-record` / `ledger-show` /

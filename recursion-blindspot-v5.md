@@ -91,7 +91,7 @@ A note on instrumentation: a useful open contribution is a *scorer*: given a rec
 
 ## 6. Reference implementation
 
-Parts of the agenda in §5 now exist as a tested open-source Python package, **`gco-spec`** version **0.1.0** (Alderline Systems; Apache-2.0). Source is at `https://github.com/SSBrouhard/gco-spec`. Claims below are pinned to commit **`89bf058016dc5040dece15dcc910ec35725ec68a`** (2026-07-30) on the repository's default branch. The GitHub repository is public as of 2026-09-21. The schema namespace is hosted at `https://alderlinesystems.com/schemas/gco_schema_v1.json` and matches this pin.
+Parts of the agenda in §5 now exist as a tested open-source Python package, **`gco-spec`** version **0.1.0** (Alderline Systems; Apache-2.0). Source is at `https://github.com/SSBrouhard/gco-spec`. Cite git tag `v0.1.0` until a PyPI package exists. Claims below are pinned to commit **`89bf058016dc5040dece15dcc910ec35725ec68a`** (2026-07-30) on the repository's default branch. The GitHub repository is public as of 2026-09-21. The schema namespace is hosted at `https://alderlinesystems.com/schemas/gco_schema_v1.json` and matches this pin.
 
 The package is a *reference implementation of authority-propagation primitives*, not a complete agent security product and not a claim that the blindspot is empirically closed for any particular frontier model. We include it to anchor the theoretical framework and make its propositions falsifiable: an inspectable baseline for the propagation contract, not a production agent firewall. Readers should be able to tell exactly what is implemented from what is not, which is why the two subsections below are separated.
 
@@ -124,7 +124,7 @@ Honesty about limits is part of the contribution. Several controls are implement
 - **No action-content monitoring.** The GCO layer asks whether a node still holds the authority its parent had; it does not decide whether a particular command is dangerous, perform DLP, block secrets, or sandbox the host. Content monitors and GCO are complementary layers; neither replaces the other.
 - **No live model evaluation in this paper.** The harness scores transcripts you already have. This paper still states no frontier-model `ΔR` numbers of its own; establishing those numbers on standard recursive harnesses remains open work under §5.4.
 - **Enforcement is host-mediated.** The runtime returns decisions; a host that ignores them has no governance. The package is a primitive, not a drop-in agent firewall.
-- **Public tree, no release tag.** The GitHub repository is public. There is still no GitHub release tag or PyPI package; citation is the commit pin above.
+- **No PyPI package.** The GitHub repository is public. Cite git tag `v0.1.0` until a PyPI package exists.
 
 ### 6.3 How to read this relative to the agenda
 
@@ -156,7 +156,7 @@ Zou, A., Phan, L., Wang, J., Duenas, D., Lin, M., Andriushchenko, M., Wang, R., 
 
 Model Context Protocol. (2026). *The 2026-07-28 Specification.* https://blog.modelcontextprotocol.io/posts/2026-07-28/ (final specification published 28 July 2026). See also the normative specification and changelog: https://modelcontextprotocol.io/specification/2026-07-28 and https://modelcontextprotocol.io/specification/2026-07-28/changelog.
 
-Alderline Systems. (2026). *gco-spec* (version 0.1.0) [Computer software]. https://github.com/SSBrouhard/gco-spec (commit `89bf058016dc5040dece15dcc910ec35725ec68a`, 2026-07-30). Schema: https://alderlinesystems.com/schemas/gco_schema_v1.json.
+Alderline Systems. (2026). *gco-spec* (version 0.1.0) [Computer software]. https://github.com/SSBrouhard/gco-spec (git tag `v0.1.0`). Schema: https://alderlinesystems.com/schemas/gco_schema_v1.json.
 
 ---
 

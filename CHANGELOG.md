@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.1.0 - 2026-09-21
+
+- Added `docs/releases/0.1.0.md` and a README minimum production posture for
+  the public 0.1.0 pin. Citation is git tag `v0.1.0` until a PyPI package
+  exists.
 - Added the v5 Recursion Blindspot position paper as the canonical in-repo
   paper (`recursion-blindspot-v5.md`) and linked it from the README.
 - Documented that the schema namespace URL is hosted and matches pin `89bf058`.

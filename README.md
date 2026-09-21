@@ -4,6 +4,14 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
+Install from git tag `v0.1.0` or the matching
+[GitHub Release](https://github.com/SSBrouhard/gco-spec/releases/tag/v0.1.0).
+Citation is git tag `v0.1.0` until a PyPI package exists:
+
+```bash
+python -m pip install "gco-spec @ git+https://github.com/SSBrouhard/gco-spec.git@v0.1.0"
+```
+
 Governance scoped to a single model forward pass does not automatically cover
 recursive or delegated computation. A Governance Context Object (GCO) is the
 authority-propagation primitive that travels with the call tree: each child
@@ -186,8 +194,11 @@ SPIFFE IDs and URNs, rather than only HTTP(S) URLs.
 
 ## Project status
 
+Install from git tag `v0.1.0` or the GitHub Release. Citation is that tag
+until a PyPI package exists. See [0.1.0 release notes](docs/releases/0.1.0.md).
+
 The position paper this package implements is
-[`recursion-blindspot-v5.md`](recursion-blindspot-v5.md) (v5; v3 is not current).
+[`recursion-blindspot-v5.md`](recursion-blindspot-v5.md).
 The schema namespace URL is hosted at
 `https://alderlinesystems.com/schemas/gco_schema_v1.json` and matches pin
 `89bf058`.
@@ -233,6 +244,25 @@ runtime = GovernanceRuntime(
 With replay protection enabled, attestations must carry a non-empty `jti`.
 The bundled cache is per process; use a shared/state-synchronized cache for
 multi-instance deployments or keep attestation TTLs short.
+
+## Minimum production posture
+
+Hosts that enforce GCO in production must:
+
+- Route every host authorization through `GovernanceRuntime` only
+  (`authorize_tool_call`, `authorize_subcall`, `derive_for_subcall`,
+  `read_state`, `write_state`). Direct calls to the validator, state store,
+  derivation runtime, or attestation verifier bypass the authority gate.
+- Set `expected_audience` on the runtime or as trust-bundle metadata.
+- Install a `ReplayCache`. Bundled `InMemoryReplayCache` is single-process
+  only. Multi-instance hosts must supply a shared atomic check-and-record
+  cache or keep attestation TTLs short.
+- Issue short-lived attestations. This implementation has no revocation.
+- If `PolicyDeploymentLedger` is used for accountability, seal
+  `head_hash()` externally and verify against that seal.
+- Treat the MCP adapter as P0 `_meta` carriage only. Refuse tool execution
+  on `Decision(allowed=False)`. Keep `handleSupport` false. Put no GCO
+  fields in tool `inputSchema`.
 
 ## Security enforcement
 

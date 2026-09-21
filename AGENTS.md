@@ -10,6 +10,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Adapter enforcement must compose `GovernanceRuntime` for authorization, derivation, attestation verification, and parent-child tightening. Do not reimplement crypto or GCO tightening logic in `gco_mcp`.
 - Tasks lifecycle glue, handle-store resolution, and SEP publication remain out of P0 even though the MCP 2026-07-28 specification is final.
 - Policy/deployment activation history lives in `src/gco/policy_ledger.py` (`PolicyDeploymentLedger`): append-only hash-chained events for `policy_id` / `intervention_version`. Hosts record activations at the deploy boundary; do not fold this into `GovernanceRuntime` authorization. See `docs/policy-ledger.md` for integrity limits (tamper-evident, not multi-writer consensus).
+- Public 0.1.0 citation is git tag `v0.1.0` until a PyPI package exists. Release notes live in `docs/releases/0.1.0.md`. The hosted schema at `https://alderlinesystems.com/schemas/gco_schema_v1.json` matches `schemas/gco_schema_v1.json`; blob SHA-256 `fd0d9aa803af0c5761bc9f99046b29abc86e54a93ccf8761d91096b878db650f`, last content-changing commit `531a134`, identical at pin `89bf058` and later `main`.
 
 ## Maintaining this file
 

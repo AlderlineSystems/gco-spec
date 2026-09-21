@@ -194,8 +194,7 @@ SPIFFE IDs and URNs, rather than only HTTP(S) URLs.
 
 ## Project status
 
-Install from git tag `v0.1.0` or the GitHub Release. Citation is that tag
-until a PyPI package exists. See [0.1.0 release notes](docs/releases/0.1.0.md).
+See [0.1.0 release notes](docs/releases/0.1.0.md).
 
 The position paper this package implements is
 [`recursion-blindspot-v5.md`](recursion-blindspot-v5.md).

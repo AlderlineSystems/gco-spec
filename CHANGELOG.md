@@ -21,8 +21,6 @@ All notable changes to this project will be documented in this file.
 - Added runnable quickstart and authority-escape demo examples, with pytest
   coverage so they stay executable.
 - Included the canonical JSON Schema in built wheel artifacts.
-- Clarified public-readiness notes for the stable schema namespace and the
-  separately published Recursion Blindspot position paper.
 - Reframed the repository as the reference implementation of the GCO concept,
   with the bundled JSON Schema as the implementation-facing contract.
 - Moved historical audit reports under `docs/audits/` with resolved-status

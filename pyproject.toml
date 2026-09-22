@@ -39,10 +39,10 @@ dependencies = [
 gco = "gco.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/SSBrouhard/gco-spec"
-Repository = "https://github.com/SSBrouhard/gco-spec"
-Issues = "https://github.com/SSBrouhard/gco-spec/issues"
-Documentation = "https://github.com/SSBrouhard/gco-spec#readme"
+Homepage = "https://github.com/AlderlineSystems/gco-spec"
+Repository = "https://github.com/AlderlineSystems/gco-spec"
+Issues = "https://github.com/AlderlineSystems/gco-spec/issues"
+Documentation = "https://github.com/AlderlineSystems/gco-spec#readme"
 
 [project.optional-dependencies]
 test = [

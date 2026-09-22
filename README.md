@@ -1,15 +1,15 @@
 # GCO Reference Implementation
 
-[![CI](https://img.shields.io/github/actions/workflow/status/SSBrouhard/gco-spec/ci.yml?branch=main&label=CI)](https://github.com/SSBrouhard/gco-spec/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/AlderlineSystems/gco-spec/ci.yml?branch=main&label=CI)](https://github.com/AlderlineSystems/gco-spec/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
 Install from git tag `v0.1.0` or the matching
-[GitHub Release](https://github.com/SSBrouhard/gco-spec/releases/tag/v0.1.0).
+[GitHub Release](https://github.com/AlderlineSystems/gco-spec/releases/tag/v0.1.0).
 Citation is git tag `v0.1.0` until a PyPI package exists:
 
 ```bash
-python -m pip install "gco-spec @ git+https://github.com/SSBrouhard/gco-spec.git@v0.1.0"
+python -m pip install "gco-spec @ git+https://github.com/AlderlineSystems/gco-spec.git@v0.1.0"
 ```
 
 Governance scoped to a single model forward pass does not automatically cover
